@@ -1,5 +1,7 @@
 import discord
 from discord.ext import commands
+from flask import Flask
+import threading
 import os
 import random
 import time
@@ -11,6 +13,8 @@ DATABASE_FILE = "vibe_data.json"
 
 def load_data():
     if os.path.exists(DATABASE_FILE):
+        if not os.path.getsize(DATABASE_FILE) > 0:
+            return {}
         with open(DATABASE_FILE, 'r') as f:
             return json.load(f)
     return {}
@@ -22,6 +26,18 @@ def save_data(data):
 # Load the initial data.
 vibe_data = load_data()
 # --- END DATABASE SETUP ---
+
+# --- FLASK WEB SERVER SETUP ---
+# Flask is a lightweight web server. We need this to keep the bot alive on Render.
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Housemate Ryker is online!"
+
+def run_flask_server():
+    app.run(host='0.0.0.0', port=os.environ.get('PORT', 8080))
+# --- END FLASK WEB SERVER SETUP ---
 
 # Enable privileged intents for the bot.
 intents = discord.Intents.default()
@@ -182,5 +198,11 @@ async def leaderboard(ctx):
     embed.description = leaderboard_string
     await ctx.send(embed=embed)
 
-# This is the main entry point to run the bot.
-bot.run(os.environ['DISCORD_TOKEN'])
+try:
+    # Run Flask server in a separate thread.
+    flask_thread = threading.Thread(target=run_flask_server)
+    flask_thread.start()
+    # Run the bot.
+    bot.run(os.environ['DISCORD_TOKEN'])
+except discord.errors.LoginFailure as e:
+    print(f"ERROR: Failed to log in. Please check your bot token. {e}")
