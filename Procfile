@@ -1,1 +1,1 @@
-bot: python3 housemate_ryker.py
+web: gunicorn housemate_ryker:app
