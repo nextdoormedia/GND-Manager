@@ -36,4 +36,4 @@ The collected data is used exclusively within this server to:
 
 We do not share your User ID, Vibe data, or any other collected information with any external third parties, including advertisers or other Discord servers.
 
-*Last Updated: [Current Date]*
+*Last Updated: September 26, 2025*
