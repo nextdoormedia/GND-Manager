@@ -1,25 +1,29 @@
 import discord
 from discord.ext import commands
-from flask import Flask
-import threading
 import os
 import random
 import time
 import json
 import typing as t
+from flask import Flask
+from threading import Thread
 
-# --- DATABASE SETUP ---
+# --- DATABASE SETUP (File-based Vibe tracking) ---
 DATABASE_FILE = "vibe_data.json"
 
 def load_data():
     if os.path.exists(DATABASE_FILE):
-        if not os.path.getsize(DATABASE_FILE) > 0:
+        try:
+            with open(DATABASE_FILE, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            print("WARNING: Vibe data file is corrupt. Starting fresh.")
             return {}
-        with open(DATABASE_FILE, 'r') as f:
-            return json.load(f)
     return {}
 
 def save_data(data):
+    # Ensure directory exists before writing (good practice for Render)
+    os.makedirs(os.path.dirname(DATABASE_FILE) or '.', exist_ok=True)
     with open(DATABASE_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
@@ -27,36 +31,29 @@ def save_data(data):
 vibe_data = load_data()
 # --- END DATABASE SETUP ---
 
-# --- FLASK WEB SERVER SETUP ---
-# Flask is a lightweight web server. We need this to keep the bot alive on Render.
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Housemate Ryker is online!"
-
-def run_flask_server():
-    app.run(host='0.0.0.0', port=os.environ.get('PORT', 8080))
-# --- END FLASK WEB SERVER SETUP ---
-
-# Enable privileged intents for the bot.
+# --- BOT SETUP (Start in a separate thread for Render) ---
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
-
-# Create the bot instance.
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# This event runs when the bot has successfully connected to Discord.
+# Threading function to run the Discord Bot
+def start_bot():
+    try:
+        # This will run the bot in the background thread
+        bot.run(os.environ['DISCORD_TOKEN'])
+    except discord.errors.LoginFailure as e:
+        print(f"ERROR: Failed to log in. Check DISCORD_TOKEN environment variable. {e}")
+
+# --- DISCORD BOT LOGIC (Remains the same) ---
+
 @bot.event
 async def on_ready():
     if bot.user:
         print(f'Logged in as {bot.user.name} ({bot.user.id})')
-        print('Ready to welcome new members!')
-        print('Ready to grant Vibe!')
+        print('Housemate Ryker is fully operational.')
         print('------')
 
-# This is the core function of the welcome bot.
 @bot.event
 async def on_member_join(member):
     welcome_channel_id = 1420121916404007136
@@ -84,7 +81,6 @@ async def on_member_join(member):
         await rules_channel.send(f"Hey {member.mention}, to get full access to the server, please read and react to the pinned message in this channel.")
 
 
-# This is the new event that listens for a reaction on a message.
 @bot.event
 async def on_raw_reaction_add(payload):
     rules_message_id = 1420130243645276262
@@ -101,7 +97,6 @@ async def on_raw_reaction_add(payload):
                     except discord.Forbidden:
                         print(f"Could not send DM to {member.name}.")
 
-# This is the leveling and XP system.
 @bot.event
 async def on_message(message):
     if message.author.bot or not isinstance(message.channel, discord.TextChannel):
@@ -120,7 +115,7 @@ async def on_message(message):
     xp_to_add = random.randint(1, 3)
     vibe_data[user_id]["vibe"] += xp_to_add
     vibe_data[user_id]["last_message_time"] = current_time
-    save_data(vibe_data) # Save data after every change
+    save_data(vibe_data)
 
     if not vibe_data[user_id]["first_vibe_message_sent"]:
         try:
@@ -155,7 +150,6 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# Command to check a user's rank.
 @bot.command(name='rank')
 async def rank(ctx):
     user_id = str(ctx.author.id)
@@ -176,12 +170,12 @@ async def rank(ctx):
     embed.add_field(name="Rank", value=rank_name, inline=True)
     await ctx.send(embed=embed)
 
-# Command to show the leaderboard.
 @bot.command(name='leaderboard')
 async def leaderboard(ctx):
     leaderboard_data = {}
     for user_id in vibe_data.keys():
         try:
+            # Note: bot.get_user requires the bot to be in the server to retrieve user data
             user = bot.get_user(int(user_id))
             if user:
                 leaderboard_data[user.name] = vibe_data[user_id]["vibe"]
@@ -198,11 +192,19 @@ async def leaderboard(ctx):
     embed.description = leaderboard_string
     await ctx.send(embed=embed)
 
-try:
-    # Run Flask server in a separate thread.
-    flask_thread = threading.Thread(target=run_flask_server)
-    flask_thread.start()
-    # Run the bot.
-    bot.run(os.environ['DISCORD_TOKEN'])
-except discord.errors.LoginFailure as e:
-    print(f"ERROR: Failed to log in. Please check your bot token. {e}")
+# --- WEB SERVER SETUP (Starts the Bot and then runs the Flask app) ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    if bot.is_ready():
+        return "Housemate Ryker is running and ready for duty!"
+    else:
+        return "Housemate Ryker is starting up...", 503
+
+# --- FINAL EXECUTION ---
+# 1. Start the Discord bot in a background thread.
+# 2. Start the Flask server in the main thread (this is what Gunicorn controls).
+if __name__ == '__main__':
+    start_bot_thread = Thread(target=start_bot)
+    start_bot_thread.start()
