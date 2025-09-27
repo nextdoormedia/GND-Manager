@@ -13,7 +13,8 @@ def start_discord_bot():
     Function to run the Discord bot's blocking client method.
     This must be run in a separate thread/process from the Flask web server.
     """
-    print("--- Housemate Ryker: Starting Discord Bot Thread ---")
+    # Updated: Changed name reference from "Housemate Ryker" to "GND Manager"
+    print("--- GND Manager: Starting Discord Bot Thread ---")
     try:
         # bot.run() is a blocking call that handles the event loop.
         # It MUST be run in its own thread/process.
@@ -39,7 +40,8 @@ def home():
     Simple health check endpoint required by the Web Service hosting model.
     If this endpoint returns successfully, the host knows the app is alive.
     """
-    return "Housemate Ryker is online and managing the neighborhood."
+    # Updated: Changed name reference in the health check message
+    return "GND Manager is online and managing the neighborhood."
 
 if __name__ == '__main__':
     # This block is for local testing only (Gunicorn ignores this in production).
