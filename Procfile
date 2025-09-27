@@ -1,1 +1,1 @@
-web: gunicorn housemate_ryker:app
+web: gunicorn app:app
