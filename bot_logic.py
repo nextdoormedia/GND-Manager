@@ -24,7 +24,7 @@ SELF_PROMO_CHANNEL_NAME = "self-promo"
 FILTERED_KEYWORDS = ["illegal content", "graphic violence", "shock video", "dtxduo impersonation", "official admin", "mod giveaway"]
 SPAM_LINKS = ["bit.ly", "tinyurl", "ow.ly", "shorte.st"]
 PROMOTION_KEYWORDS = ["subscribe", "patreon", "youtube", "twitch", "onlyfans", "my channel", "check out my"]
-VIBE_RANKS = {"New Neighbor": 0, "Familiar Face": 100, "Resident": 250, "Housemate": 500, "Block Captain": MAX_VIBE_FOR_PRESTIGE}
+VIBE_RANKS = {"New Neighbor": 250, "Familiar Face": 500, "Resident": 1000, "Housemate": 1500, "Block Captain": MAX_VIBE_FOR_PRESTIGE}
 # Vibe Shop Items (Expanded - Total 15 Items)
 VIBE_SHOP_ITEMS = {
     # COSMETIC FLAIRS (Icons next to Nickname) - Fulfilled by Admin using !set_icon or !set_flair
