@@ -1,18 +1,31 @@
 import os
 from flask import Flask
 import asyncio
-from bot_logic import bot # Import the bot instance from the logic file
+# Ensure bot_logic.py is in the same directory for this import to work
+from bot_logic import bot 
 
 app = Flask(__name__)
 
-# This function runs when the Flask server starts, which is managed by Gunicorn.
-@app.before_first_request
+# Global flag to ensure bot starts only once per Gunicorn worker process
+bot_started = False
+
+# The modern, non-deprecated way to execute code that needs to run once.
+# We use a flag inside this function to achieve the "run once" behavior.
+@app.before_request
 def launch_bot():
-    print("Launching Discord Bot client via asyncio...")
-    # Get the event loop and safely start the bot as a background task.
-    loop = asyncio.get_event_loop()
-    # The bot's token is read from the environment variable set on Render.
-    loop.create_task(bot.start(os.getenv('DISCORD_TOKEN')))
+    global bot_started
+    # Check the flag. If the bot hasn't started in this process, start it.
+    if not bot_started:
+        print("Launching Discord Bot client via asyncio...")
+        
+        # Get the event loop and safely schedule the bot start as a background task.
+        loop = asyncio.get_event_loop()
+        
+        # The bot's token is read from the environment variable set on Render.
+        loop.create_task(bot.start(os.getenv('DISCORD_TOKEN')))
+        
+        # Set the flag so this block never runs again in this worker process.
+        bot_started = True
 
 @app.route('/')
 def home():
