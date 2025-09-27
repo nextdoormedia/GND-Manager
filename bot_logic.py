@@ -1,5 +1,5 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from datetime import datetime
 import os, random, json, time, asyncio
 
@@ -25,8 +25,31 @@ FILTERED_KEYWORDS = ["illegal content", "graphic violence", "shock video", "dtxd
 SPAM_LINKS = ["bit.ly", "tinyurl", "ow.ly", "shorte.st"]
 PROMOTION_KEYWORDS = ["subscribe", "patreon", "youtube", "twitch", "onlyfans", "my channel", "check out my"]
 VIBE_RANKS = {"New Neighbor": 0, "Familiar Face": 100, "Resident": 250, "Housemate": 500, "Block Captain": MAX_VIBE_FOR_PRESTIGE}
-VIBE_SHOP_ITEMS = {1: {"name": "Icon", "cost": 500, "description": "Icon (Nickname Prefix)"}, 2: {"name": "Flair", "cost": 1000, "description": "Flair (Custom Role)"}}
-
+# Vibe Shop Items (Expanded - Total 15 Items)
+VIBE_SHOP_ITEMS = {
+    # COSMETIC FLAIRS (Icons next to Nickname) - Fulfilled by Admin using !set_icon or !set_flair
+    1: {"name": "Flair: 🏡 House Icon", "cost": 500, "type": "nickname_icon", "description": "Adds a small house icon next to your name."},
+    2: {"name": "Flair: 💎 Diamond Icon", "cost": 750, "type": "nickname_icon", "description": "Adds a diamond icon for a luxury look."},
+    3: {"name": "Flair: 🛠️ Toolbox Icon", "cost": 1000, "type": "nickname_icon", "description": "A flair that says you're handy around the neighborhood."},
+    4: {"name": "Flair: 🍾 Champagne Pop", "cost": 1200, "type": "nickname_icon", "description": "Celebrate with a champagne emoji flair."},
+    # PROFILE CUSTOMIZATION (Requires manual admin fulfillment via the Mod Alert)
+    5: {"name": "Profile Custom Text (30 days)", "cost": 1500, "type": "profile_text", "description": "Get a custom, temporary 30-day message on your profile embed."},
+    6: {"name": "Custom Profile Color", "cost": 2500, "type": "profile_color", "description": "Allows you to change your !profile embed color (HEX code)."},
+    7: {"name": "One-Time Nickname Change", "cost": 3000, "type": "nickname_change", "description": "Grants a one-time change of your display nickname."},
+    # EXCLUSIVE CONTENT/ACCESS (Admin Fulfillment)
+    8: {"name": "1-Day Poll Pick", "cost": 500, "type": "poll_pick", "description": "You choose the topic for Friday's community-wide poll."},
+    9: {"name": "Signed Digital Photo", "cost": 5000, "type": "admin_item", "description": "One digital photo, custom-signed by the GuysNextDoor (delivered via DM)."},
+    10: {"name": "Custom Text Vibe Title", "cost": 10000, "type": "custom_title", "description": "Replaces 'Vibe Score' on your profile with a short, custom title."},
+    # BONUS ITEMS
+    11: {"name": "Vibe Jackpot Entry", "cost": 1000, "type": "lottery", "description": "Entry into the weekly Vibe Raffle drawing."},
+    12: {"name": "Gift: 50 Vibe to a Friend", "cost": 300, "type": "gift", "description": "Spend Vibe to instantly send 50 Vibe to any other member."},
+}
+# --- VIBE RAFFLE CONFIG ---
+RAFFLE_DATA_KEY = "GLOBAL_RAFFLE_DATA" # NEW: Key reserved for raffle data in vibe_data.json
+MIN_RAFFLE_POOL = 10000 
+MAX_RAFFLE_POOL = 35000 
+# Winner of Raffle posted in #announcements
+RAFFLE_WINNER_CHANNEL_ID = 1420123811675635783
 # --- INTENTS SETUP (CRITICAL!) ---
 # Declare all necessary intents, especially the privileged ones
 intents = discord.Intents.default()
@@ -56,6 +79,14 @@ def load_data():
     else:
         vibe_data = {}
 
+# NEW: Initialize the global raffle data structure if it's missing
+    if RAFFLE_DATA_KEY not in vibe_data:
+        vibe_data[RAFFLE_DATA_KEY] = {
+            "pool_amount": 0,
+            "ticket_holders": [],
+            "rollover": 0
+        }
+        
 def save_data(data):
     """Saves Vibe data to the JSON file."""
     with open(DATABASE_FILE, 'w') as f:
@@ -67,6 +98,12 @@ def get_user_data(user_id):
     if user_id not in vibe_data:
         vibe_data[user_id] = {'vibe': 0, 'last_daily': 0, 'streak': 0, 'rank': 'New Neighbor', 'prestige': 0, 'nickname_icon': '', 'nickname_flair': ''}
     return vibe_data[user_id]
+
+@tasks.loop(minutes=5.0)
+async def periodic_save():
+    """Saves the vibe data every 5 minutes to prevent data loss."""
+    save_data(vibe_data)
+    print("💾 Data saved periodically.")
 
 def update_user_rank(user_id, current_vibe):
     """Determines and returns the correct rank name for a given vibe total."""
@@ -105,12 +142,15 @@ async def update_nickname_display(member, user_data):
     if not member.guild: return # Cannot change nickname in DM
 
     icon = user_data.get('nickname_icon', '')
+    # ADDED: Retrieve the flair suffix
+    flair = user_data.get('nickname_flair', '') 
     
     # Get the original name (or current nickname if set by another admin)
     original_name = member.name
     
-    # Construct the desired nickname format: Icon Name
-    new_nickname = f"{icon} {original_name}" if icon else original_name
+    # Construct the desired nickname format: [Icon] [Name] [Flair]
+    # MODIFIED: Build the nickname with both icon (prefix) and flair (suffix)
+    new_nickname = f"{icon} {original_name} {flair}" 
     
     # Strip leading/trailing spaces and ensure it respects the 32-char limit
     new_nickname = new_nickname.strip()
@@ -123,7 +163,8 @@ async def update_nickname_display(member, user_data):
     if member.nick != new_nickname and member.guild.me.top_role.position > member.top_role.position:
         try:
             # If the new nickname is the same as the user's current server name, set nick to None to clear it.
-            if new_nickname == original_name:
+            # MODIFIED: Check if the nickname is effectively empty/default (no icon AND no flair)
+            if new_nickname == original_name and not icon and not flair: 
                 await member.edit(nick=None, reason="Vibe System Nickname Cleared")
             else:
                 await member.edit(nick=new_nickname, reason="Vibe System Nickname Update")
@@ -136,6 +177,10 @@ async def update_nickname_display(member, user_data):
 async def on_ready():
     """Confirms bot connection and sets initial status."""
     load_data() # Ensure data is loaded on connection/reconnection
+    # ADDED LOGIC: Check and start the periodic save task
+    if not periodic_save.is_running():
+        periodic_save.start()
+        
     print(f'🤖 Housemate Ryker is online! Logged in as {bot.user}')
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="the block 🏡"))
     
@@ -165,7 +210,35 @@ async def on_raw_reaction_add(payload):
         except discord.Forbidden:
             print("ERROR: Missing permissions to grant role for verification.")
 
+# --- MODERATION EVENTS ---
 
+async def send_mod_alert_embed(title: str, description: str, color: discord.Color):
+    """Helper function to send a formatted embed to the mod alerts channel."""
+    alerts_channel = bot.get_channel(MOD_ALERTS_CHANNEL_ID)
+    if alerts_channel:
+        embed = discord.Embed(title=title, description=description, color=color, timestamp=datetime.now())
+        await alerts_channel.send(embed=embed)
+
+
+@bot.event
+async def on_member_remove(member):
+    """Alerts mods when a member leaves (or is kicked)."""
+    # Note: Cannot distinguish between leave and kick without Audit Log access/check
+    await send_mod_alert_embed(
+        title="🚪 Member Left/Kicked",
+        description=f"**User:** {member.display_name} ({member.id})\n**Account Created:** {member.created_at.strftime('%Y-%m-%d')}",
+        color=discord.Color.orange()
+    )
+
+@bot.event
+async def on_member_ban(guild, user):
+    """Alerts mods when a member is banned."""
+    await send_mod_alert_embed(
+        title="🔨 Member BANNED",
+        description=f"**User:** {user.display_name} ({user.id})\n**Guild:** {guild.name}",
+        color=discord.Color.red()
+    )
+    
 # --- MESSAGE AND FILTERING HANDLER ---
 @bot.event
 async def on_message(message):
@@ -313,6 +386,51 @@ async def daily(ctx):
     
     await ctx.author.send(embed=embed)
 
+@bot.command(name='gift')
+@commands.guild_only()
+async def gift_vibe(ctx, recipient: discord.Member, amount: int):
+    """
+    Allows a user to gift Vibe to another member, primarily fulfilling a shop item purchase.
+    Note: Requires manual input of the amount and is not tied directly to shop item ID 15.
+    """
+    SENDER_COST = 300 # Standard cost from Shop Item 15
+    GIFT_AMOUNT = 50  # Standard gift amount from Shop Item 15
+    
+    # Check if the sender is trying to use the standard shop gift feature
+    if amount != GIFT_AMOUNT or SENDER_COST <= 0:
+        return await ctx.send(f"❌ **Error:** Gifting is currently only supported as the standard shop package: **{GIFT_AMOUNT} Vibe** for **{SENDER_COST} Vibe** total cost.")
+
+    if ctx.author == recipient:
+        return await ctx.send("❌ You cannot gift Vibe to yourself!", delete_after=5)
+    
+    sender_data = get_user_data(ctx.author.id)
+    recipient_data = get_user_data(recipient.id)
+
+    if sender_data['vibe'] < SENDER_COST:
+        return await ctx.send(f"❌ You need at least **{SENDER_COST} Vibe** to purchase and send this gift.", delete_after=10)
+
+    # 1. Deduct cost from sender
+    sender_data['vibe'] -= SENDER_COST
+    # 2. Add gifted Vibe to recipient
+    recipient_data['vibe'] += GIFT_AMOUNT
+    save_data(vibe_data)
+    
+    # 3. Send confirmation
+    await ctx.send(f"✅ **Gift Sent!** You spent **{SENDER_COST} Vibe** and sent **{GIFT_AMOUNT} Vibe** to {recipient.mention}!", delete_after=10)
+
+    # 4. Notify recipient (via DM or Channel message)
+    try:
+        await recipient.send(f"🎁 **You received a gift!** {ctx.author.display_name} sent you **{GIFT_AMOUNT} Vibe**! Your new total Vibe is **{recipient_data['vibe']}**.")
+    except discord.Forbidden:
+        # If DMs are closed, send in channel
+        await ctx.send(f"✨ {recipient.mention}, check your profile! You received a **{GIFT_AMOUNT} Vibe** gift from {ctx.author.display_name}.", delete_after=10)
+
+    # Force updates
+    if ctx.guild:
+        await update_member_roles(ctx.author, sender_data['vibe'])
+        await update_nickname_display(ctx.author, sender_data)
+        await update_member_roles(recipient, recipient_data['vibe'])
+        await update_nickname_display(recipient, recipient_data)
 
 @bot.command()
 async def rank(ctx):
@@ -437,7 +555,7 @@ async def shop(ctx):
         shop_string += f"**[ID: {item_id}]** **{item['name']}** - {item['cost']} Vibe\n *{item['description']}*\n"
     
     embed = discord.Embed(
-        title="🛍️ The Housemate Vibe Shop",
+        title="🛍️ The Vibe Shop",
         description=shop_string,
         color=discord.Color.orange()
     )
@@ -445,8 +563,15 @@ async def shop(ctx):
     await ctx.send(embed=embed)
 
 @bot.command()
+@commands.guild_only()
 async def buy(ctx, item_id: int):
-    """Purchases an item from the Vibe Shop by ID."""
+    """
+    Purchases an item from the Vibe Shop by ID.
+    Integrates 'Free Parking' logic: all Vibe spent goes into the raffle pool.
+    """
+    RAFFLE_TICKET_ID = 11
+    GIFT_ITEM_ID = 12
+
     if item_id not in VIBE_SHOP_ITEMS:
         await ctx.send("❌ **ERROR:** That item ID doesn't exist in the shop.")
         return
@@ -454,24 +579,45 @@ async def buy(ctx, item_id: int):
     item = VIBE_SHOP_ITEMS[item_id]
     cost = item['cost']
     user_data = get_user_data(ctx.author.id)
+    raffle_pool = vibe_data.get(RAFFLE_DATA_KEY, {}) # Safely get integrated raffle data
 
+    # 1. Block Gift Item (Requires separate !gift command)
+    if item_id == GIFT_ITEM_ID:
+        await ctx.send(f"❌ **USE `!gift`:** To buy and send the **{item['name']}**, please use the dedicated command: `!gift @[member] 50`")
+        return
+
+    # 2. Check Vibe Balance
     if user_data['vibe'] < cost:
         await ctx.send(f"❌ **NOT ENOUGH VIBE:** You need {cost - user_data['vibe']} more Vibe to buy the **{item['name']}**.")
         return
         
-    # Process purchase
-    user_data['vibe'] -= cost
-    save_data(vibe_data)
+    # --- Process Purchase ---
     
-    # Send confirmation to the user
-    await ctx.send(f"✅ **PURCHASE SUCCESSFUL!** Your purchase of **{item['name']}** has been logged. Mods will reach out to fulfill your request soon.")
-
-    # Send detailed alert to mod channel (CRITICAL ALERT)
+    # 3. Deduct Vibe from user
+    user_data['vibe'] -= cost
+    
+    # 4. Free Parking: Add Vibe to Raffle Pool
+    raffle_pool['pool_amount'] += cost
+    
+    # 5. Handle Raffle Ticket Purchase
+    if item_id == RAFFLE_TICKET_ID:
+        raffle_pool['ticket_holders'].append(str(ctx.author.id))
+        
+        await ctx.send(f"🎟️ **Raffle Ticket Purchased!** Your name has been entered into the draw. Current Pool: **{raffle_pool['pool_amount']:,} Vibe**.", delete_after=10)
+        
+        # Save data and update roles immediately for ticket purchase
+        save_data(vibe_data)
+        await update_member_roles(ctx.author, user_data['vibe'])
+        return # End here, no manual fulfillment needed
+    
+    # --- Manual Fulfillment Alert (For all other items) ---
+    
     mod_channel = bot.get_channel(MOD_ALERTS_CHANNEL_ID)
     if mod_channel:
-        fulfillment_instruction = "Manual fulfillment required."
-        if item_id == 1:
-            fulfillment_instruction = f"Fulfill using: `!set_icon {ctx.author.mention} [icon]`"
+        # Check for cosmetic items to provide fulfillment help
+        fulfillment_instruction = "Manual fulfillment required (Check Item Description)."
+        if item_id in [1, 2, 3, 4]:
+             fulfillment_instruction = f"Fulfill using: `!set_icon {ctx.author.mention} [icon]`"
         
         alert_embed = discord.Embed(
             title="💰 SHOP PURCHASE ALERT - Action Required",
@@ -484,6 +630,13 @@ async def buy(ctx, item_id: int):
         alert_embed.add_field(name="Fulfillment Action", value=fulfillment_instruction, inline=False)
         
         await mod_channel.send(embed=alert_embed)
+        
+    # Send user confirmation for manual items
+    await ctx.send(f"✅ **PURCHASE SUCCESSFUL!** Your purchase of **{item['name']}** has been logged. Mods will reach out to fulfill your request soon.")
+
+    # Save data and update roles for manual items
+    save_data(vibe_data)
+    await update_member_roles(ctx.author, user_data['vibe'])
 
 # --- ADMIN UTILITIES ---
 
@@ -536,6 +689,36 @@ async def set_icon(ctx, member: discord.Member, icon: str):
 
     await ctx.send(f"✅ **Icon Updated:** Set icon for {member.display_name} to: {icon}")
 
+# ADDED LOGIC: !set_flair command
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def set_flair(ctx, member: discord.Member, flair: str):
+    """Admin command to set a cosmetic flair (suffix) next to a user's nickname."""
+    user_data = get_user_data(member.id)
+    # MODIFIED: Increased limit to 5 characters for text-based flair
+    user_data['nickname_flair'] = flair[:5] 
+    save_data(vibe_data)
+    
+    # Apply change immediately (QoL)
+    if ctx.guild:
+        await update_nickname_display(member, user_data)
+
+    await ctx.send(f"✅ **Flair Updated:** Set flair for {member.display_name} to: `{flair[:5]}`. (Recommended: Text/short word)")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def clear_flair(ctx, member: discord.Member):
+    """Admin command to remove a user's cosmetic flair (suffix)."""
+    user_data = get_user_data(member.id)
+    user_data['nickname_flair'] = '' # Set flair to an empty string
+    save_data(vibe_data)
+    
+    # Apply change immediately (QoL)
+    if ctx.guild:
+        await update_nickname_display(member, user_data)
+
+    await ctx.send(f"✅ **Flair Cleared:** Removed flair for {member.display_name}.")
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def say(ctx, channel: discord.TextChannel, *, message: str):
@@ -546,7 +729,170 @@ async def say(ctx, channel: discord.TextChannel, *, message: str):
     except Exception as e: 
         await ctx.send(f"❌ Could not post message to {channel.mention}. Error: {e}")
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def deduct_vibe(ctx, member: discord.Member, amount: int, *, reason: str = "Administrative deduction"):
+    """Admin command to deduct Vibe and trigger a disciplinary alert."""
+    if amount <= 0:
+        return await ctx.send("❌ Deduction amount must be greater than zero.", delete_after=5)
+
+    user_data = get_user_data(member.id)
+    old_vibe = user_data['vibe']
+    user_data['vibe'] = max(0, old_vibe - amount) # Vibe cannot go below zero
+    save_data(vibe_data)
+    
+    # Send confirmation to admin
+    await ctx.send(f"✅ Deducted **{amount} Vibe** from {member.display_name}. New Vibe: {user_data['vibe']}", delete_after=10)
+    await ctx.message.delete()
+    
+    # Trigger disciplinary alert
+    await send_mod_alert_embed(
+        title="⬇️ Vibe Deduction Alert",
+        description=f"**User:** {member.display_name} ({member.id})\n**Amount Deducted:** {amount} Vibe (New Total: {user_data['vibe']})\n**Reason:** {reason}\n**Moderator:** {ctx.author.display_name}",
+        color=discord.Color.dark_red()
+    )
+    
+    # Force rank update after deduction
+    if ctx.guild:
+        await update_member_roles(member, user_data['vibe'])
+        await update_nickname_display(member, user_data)
+
+import random # Ensure this is in your imports (it should be)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def raffle_draw(ctx):
+    """Admin command to draw the winner of the accumulated Vibe Raffle pool (Free Parking)."""
+    
+    # Access the integrated raffle data structure
+    raffle_pool = vibe_data.get(RAFFLE_DATA_KEY)
+    
+    # Safety Check: Ensure the data structure exists
+    if not raffle_pool:
+        return await ctx.send("❌ **System Error:** Raffle data key not found. Run `!load_data` or check config.")
+    
+    # 1. Check Minimum Pool Requirement
+    if raffle_pool['pool_amount'] < MIN_RAFFLE_POOL:
+        return await ctx.send(f"❌ **Raffle Postponed:** The current pool of **{raffle_pool['pool_amount']:,} Vibe** is below the minimum requirement of **{MIN_RAFFLE_POOL:,} Vibe**. Postponing until next week.")
+
+    # 2. Check for Tickets
+    if not raffle_pool['ticket_holders']:
+        return await ctx.send("❌ **Raffle Error:** Pool is large enough, but no raffle tickets have been purchased yet.")
+
+    # 3. Set up the Pool and Rollover
+    draw_pool = raffle_pool['pool_amount']
+    rollover_amount = 0
+    if draw_pool > MAX_RAFFLE_POOL:
+        # Calculate rollover
+        rollover_amount = draw_pool - MAX_RAFFLE_POOL
+        # Limit the prize to the max pool size
+        draw_pool = MAX_RAFFLE_POOL
+
+    # 4. Draw the Winner
+    # Randomly select a winner's ID (stored as string)
+    winner_id_str = random.choice(raffle_pool['ticket_holders'])
+    winner_id = int(winner_id_str)
+    winner = ctx.guild.get_member(winner_id)
+    
+    # Fallback name if the winner has left the server
+    winner_display_name = winner.mention if winner else f"User ID: {winner_id} (No longer in server)"
+    
+    # 5. Payout Vibe
+    winner_data = get_user_data(winner_id) # Ensure this loads or initializes the winner's data
+    winner_data['vibe'] += draw_pool
+    # NOTE: save_data() is called at the end
+    
+    # 6. Announce and Embed Setup
+    announcement_channel = bot.get_channel(RAFFLE_WINNER_CHANNEL_ID) or ctx.channel
+    
+    embed = discord.Embed(
+        title="🎉 VIBE RAFFLE WINNER! 🎉",
+        description=f"The **{draw_pool:,} Vibe** Free Parking Pool has been drawn!",
+        color=discord.Color.gold()
+    )
+    embed.add_field(name="💰 Grand Prize", value=f"**{draw_pool:,} Vibe**", inline=False)
+    embed.add_field(name="🏆 Winner", value=winner_display_name, inline=True)
+    embed.add_field(name="🎟️ Total Tickets", value=len(raffle_pool['ticket_holders']), inline=True)
+    
+    # Rollover Note
+    if rollover_amount > 0:
+         embed.set_footer(text=f"Note: {rollover_amount:,} Vibe will be rolled over into the next raffle pool!")
+         
+    await announcement_channel.send(f"**CONGRATULATIONS {winner.mention}!**", embed=embed)
+    
+    # 7. Reset Raffle Data and Save Rollover
+    # Update the integrated key within the main data structure
+    vibe_data[RAFFLE_DATA_KEY] = {
+        "pool_amount": rollover_amount,
+        "ticket_holders": [],
+        "rollover": rollover_amount # Stores the amount rolled over for confirmation
+    }
+    
+    # Save the updated Vibe Data (user Vibe balance and the new raffle pool)
+    save_data(vibe_data)
+    
+    # 8. Force rank update for winner
+    if ctx.guild and winner:
+        await update_member_roles(winner, winner_data['vibe'])
+        await update_nickname_display(winner, winner_data)
+        
+    await ctx.send(f"✅ Raffle draw complete. Winner announced in {announcement_channel.mention}. {rollover_amount:,} Vibe rolled over.", delete_after=5)
+
 # --- COMMUNITY UTILITIES ---
+
+# ADDED LOGIC: !verify command
+@bot.command(name='verify')
+@commands.guild_only() 
+async def verify_command(ctx):
+    """
+    [REDUNDANCY] Allows a new member to type !verify if the reaction system fails.
+    """
+    member = ctx.author
+    # Helper to get the role (copying from bot_logic1.py)
+    def get_member_role(guild, role_name):
+        return discord.utils.get(guild.roles, name=role_name)
+        
+    member_role = get_member_role(ctx.guild, MEMBER_ROLE_NAME)
+    
+    # Check if the command is run in the verification channel (good practice)
+    if ctx.channel.id != WELCOME_CHANNEL_ID:
+        try:
+             # Send a temporary reply to redirect user
+            welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
+            if welcome_channel:
+                 await ctx.send(f"Please use this command in the verification channel, {welcome_channel.mention}.", delete_after=10)
+        except:
+            pass # Ignore if channel not found
+        finally:
+            await ctx.message.delete()
+            return
+    
+    # Error checking for role existence
+    if not member_role:
+        await ctx.send("❌ **System Error:** The required 'Member' role was not found. Contact an admin.", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    # Check if already verified
+    if member_role in member.roles:
+        await ctx.send("✅ You are already verified and are a Member of the Neighborhood!", delete_after=5)
+        await ctx.message.delete()
+        return
+
+    # Assign the Role
+    try:
+        await member.add_roles(member_role, reason="Self-Verification via Command Redundancy")
+        await ctx.send("✅ **Verification Complete!** Welcome to the Neighborhood. You now have full access.", delete_after=10)
+        print(f"✅ VERIFY (COMMAND): Granted {MEMBER_ROLE_NAME} to {member.display_name}")
+
+    except discord.Forbidden:
+        await ctx.send("🚨 **Bot Error:** I cannot assign the role. Check my role hierarchy and permissions.", delete_after=15)
+    except Exception as e:
+        print(f"An unexpected error occurred during command verification: {e}")
+        await ctx.send("❌ An unexpected error occurred. Please try again or contact an admin.", delete_after=15)
+
+    # Always delete the command message for a cleaner channel
+    await ctx.message.delete()
 
 @bot.command()
 async def report(ctx, member: discord.Member, *, reason: str):
