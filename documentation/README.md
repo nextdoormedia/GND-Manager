@@ -1,70 +1,57 @@
-# 🏡 Housemate Ryker: The GuysNextDoor Community Manager
+🏡 Housemate Ryker: The GuysNextDoor Community Manager
+Housemate Ryker is a custom-built Discord bot designed for the GuysNextDoor community. Its primary function is to automate moderation, drive member engagement, and provide a stable, feature-rich environment.
 
-**Housemate Ryker** is a custom-built Discord bot designed for the GuysNextDoor community. Its primary function is to automate moderation, drive member engagement, and provide a stable, on-brand environment so that you, as the creator, can focus on content creation and personal goals.
+This bot is engineered for 24/7 uptime using a Web Service hosting model to prevent the "sleeping bot" issues common on free hosting platforms.
 
-This bot is engineered for 24/7 uptime using a **Web Service** hosting model to prevent the "sleeping bot" issues common on free hosting platforms.
+✨ Core Features (Vibe Economy 2.0)
+Housemate Ryker now runs a complete, persistent economy with user customization and strong moderation tools:
 
-## ✨ Core Features
-
-Housemate Ryker handles all the heavy lifting, ensuring your server runs itself:
+|
 
 | Feature | Description | On-Brand Terminology |
-| ----- | ----- | ----- |
-| **Verification System** | Automatically grants the **Member** role to users who react to the rules message. | `New Neighbor Welcome` |
-| **Vibe (XP) System** | Rewards users for sending messages with 1-3 Vibe points. Includes a **15-second cooldown** to prevent spam. | `Moving Up The Block` |
-| **Automatic Leveling** | Automatically assigns and removes cosmetic roles when a member reaches a Vibe milestone. | `Neighborhood Ranks` |
-| **Uptime Management** | Runs a Flask web server in a separate thread to ensure 24/7 uptime on hosting services like Render. | `Always Home` |
+| Verification System | Automatically grants the Member role to users who react to the rules message. | New Neighbor Welcome |
+| Vibe (XP) System | Rewards users for sending messages (1-3 Vibe) with a 15-second cooldown to prevent spam. | Moving Up The Block |
+| Daily Streak | Users can claim a daily Vibe bonus that increases with their consecutive streak. | Daily Chores |
+| Profile Customization | Allows users to buy permanent profile icons and flairs visible on !profile. | Personalize Your Property |
+| Anti-Spam/Promotion | Auto-filters suspicious links and promotional messages outside of designated channels. | Keep the Street Clean |
+| Prestige System | End-game feature allowing max-rank users to reset Vibe for a permanent Legacy Resident tier. | Achieving Legacy Status |
 
-## 📈 Neighborhood Ranks (Vibe Levels)
-
-The bot manages the following cosmetic roles automatically:
+📈 Neighborhood Ranks and Prestige Tiers
+The bot manages and grants the following cosmetic roles automatically. The Vibe threshold has been increased to support the new economy.
 
 | Vibe Required | Rank Role Name |
-| ----- | ----- |
-| 1 - 100 Vibe | **New Neighbor** |
-| 101 - 250 Vibe | **Familiar Face** |
-| 251 - 500 Vibe | **Resident** |
-| 501 - 1000 Vibe | **Housemate** |
-| 1001+ Vibe | **Block Captain** |
+| 1 - 100 Vibe | New Neighbor |
+| 101 - 250 Vibe | Familiar Face |
+| 251 - 500 Vibe | Resident |
+| 501 - 2000 Vibe | Housemate |
+| 2000+ Vibe | Block Captain (Max Rank for Prestige) |
 
-## 🤖 User Commands
+Prestige Tiers: Legacy Resident I, Legacy Resident II, etc. (Permanent status gained via !prestige).
 
-Members can interact with the leveling system using these commands:
+🤖 User Commands
+| Command | Category | Description |
+| !profile | Vibe | Displays full user stats, including Vibe, Rank, Streak, and purchased Custom Icon/Flair. |
+| !daily | Vibe | Claims the daily Vibe bonus and maintains the streak. |
+| !rank | Vibe | Shows Vibe count and progress to the next level. |
+| !leaderboard | Vibe | Shows the top 10 members with the highest Vibe. |
+| !prestige | Vibe | Resets Vibe at max rank (2000+) to earn a permanent Prestige Tier. |
+| !shop / !buy <ID> | Economy | Displays and purchases exclusive profile perks and creator interactions. |
+| !report <@user> <reason> | Safety | Confidentially reports a user to the moderation team. |
+| !nom_vote <@user> | Community | Casts a vote for the Neighbor of the Month. |
 
-| Command | Description |
-| ----- | ----- |
-| `!rank` | Displays the user's current Vibe count and their current neighborhood rank. |
-| `!leaderboard` | Shows the top 10 members with the highest Vibe in the server. |
+🛡️ Administrative Commands (Moderator Use)
+| Command | Purpose | Fulfillment Type |
+| !vibe_penalty | Deducts Vibe from a user and logs the action in the user's history. | Moderation |
+| !set_icon @user <emoji> | Fulfills Vibe Shop Item #1. Sets the user's permanent profile icon. | Fulfillment |
+| !set_flair @user <text> | Fulfills Vibe Shop Item #2. Sets the user's permanent custom flair. | Fulfillment |
+| !say #channel <message> | Posts a custom, markdown-formatted message to any specified channel. | Utility |
+| !nom_winner | Calculates and announces the winner of the Neighbor of the Month vote. | Utility |
 
-## ⚙️ Setup and Deployment (Render)
+⚙️ Setup and Deployment
+This project remains configured for 24/7 deployment on Render as a Web Service.
 
-This project is specifically configured to be deployed on **Render** as a **Web Service** to guarantee continuous operation.
+Start Command: gunicorn housemate_ryker:app
 
-### 1. Prerequisites
+Discord Setup: Requires roles: Member, New Neighbor, Familiar Face, Resident, Housemate, Block Captain, and Prestige Roles (Legacy Resident I, etc.).
 
-1. A Discord Bot Token (added as an environment variable).
-
-2. The following roles created in the Discord server (must match names exactly): `Member`, `New Neighbor`, `Familiar Face`, `Resident`, `Housemate`, `Block Captain`.
-
-### 2. Files Overview
-
-The following files are required for deployment:
-
-| File | Purpose | Critical Element |
-| ----- | ----- | ----- |
-| `housemate_ryker.py` | Contains all bot logic, including the threading necessary to run the Discord Bot and Flask Web Server concurrently. | Runs Discord bot in a **background thread**. |
-| `requirements.txt` | Lists all necessary Python packages. | Must include `discord.py`, `Flask`, and `gunicorn`. |
-| `Procfile` | Instructs the hosting platform (Render) how to start the Web Service. | Uses `gunicorn` to run the Flask web server in the **main thread**. |
-
-### 3. Critical Hosting Configuration
-
-To achieve 24/7 uptime, the service must be deployed with the following settings on Render:
-
-| Setting | Value | Rationale |
-| ----- | ----- | ----- |
-| **Service Type** | Web Service | Required for continuous uptime (Render's health checks). |
-| **Build Command** | `pip install -r requirements.txt` | Installs all dependencies. |
-| **Start Command** | `gunicorn housemate_ryker:app` | Executes the Flask server, which in turn starts the Discord bot in the background thread. |
-| **Environment Variable** | `DISCORD_TOKEN` | Stores the secure bot token. |
-
-*Created by the GuysNextDoor Team.*
+Created by the GuysNextDoor Team.
