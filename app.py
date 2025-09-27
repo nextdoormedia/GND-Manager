@@ -1,40 +1,39 @@
 import os
 from flask import Flask
-import asyncio
+import threading
 # Ensure bot_logic.py is in the same directory for this import to work
 from bot_logic import bot 
 
 app = Flask(__name__)
 
-# Global flag to ensure bot starts only once per Gunicorn worker process
-bot_started = False
+# --- START BOT IN A SEPARATE THREAD ---
 
-# The modern, non-deprecated way to execute code that needs to run once.
-# We use a flag inside this function to achieve the "run once" behavior.
-@app.before_request
-def launch_bot():
-    global bot_started
-    # Check the flag. If the bot hasn't started in this process, start it.
-    if not bot_started:
-        print("Launching Discord Bot client via asyncio...")
-        
-        # Get the event loop and safely schedule the bot start as a background task.
-        loop = asyncio.get_event_loop()
-        
-        # The bot's token is read from the environment variable set on Render.
-        loop.create_task(bot.start(os.getenv('DISCORD_TOKEN')))
-        
-        # Set the flag so this block never runs again in this worker process.
-        bot_started = True
+def start_discord_bot():
+    """Function to run the Discord bot's blocking client method."""
+    print("--- Housemate Ryker: Starting Discord Bot Thread ---")
+    try:
+        # bot.run() is a blocking call that handles the event loop.
+        # It MUST be run in its own thread/process.
+        bot.run(os.getenv('DISCORD_TOKEN'), reconnect=True)
+    except Exception as e:
+        # If this fires, it means the bot failed to log in (usually bad token) 
+        # or crashed due to a critical error.
+        print(f"FATAL ERROR IN DISCORD BOT THREAD: {e}")
+
+# The code below runs once when the Gunicorn worker process starts.
+print("--- Gunicorn Worker Booted, Initiating Bot Startup ---")
+discord_thread = threading.Thread(target=start_discord_bot)
+# Setting to daemon=True allows the Flask server to exit cleanly if necessary,
+# but it mainly ensures the bot thread runs in the background.
+discord_thread.daemon = True 
+discord_thread.start()
+
+
+# --- FLASK WEB SERVER (For Render Health Check) ---
 
 @app.route('/')
 def home():
     # Health check endpoint required by Render's Web Service model
     return "Housemate Ryker is online and managing the neighborhood."
 
-if __name__ == '__main__':
-    # For local testing only (Gunicorn ignores this block)
-    if os.getenv('DISCORD_TOKEN'):
-        app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000))
-    else:
-        print("ERROR: DISCORD_TOKEN environment variable not set.")
+# The if __name__ == '__main__': block is ignored by Gunicorn in production.
