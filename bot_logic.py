@@ -1,12 +1,13 @@
 # bot_logic.py
-# Core logic, commands, and events for Housemate Ryker.
+# Core logic, commands, and events for GND Manager.
 
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from discord.ext import commands
 import discord
 import asyncio
+import time # Added for !status command
 
 # --- CONFIGURATION & SETUP ---
 
@@ -20,14 +21,17 @@ MOD_ALERT_CHANNEL_ID = 123456789012345678  # Placeholder: Replace with actual Mo
 VERIFICATION_CHANNEL_ID = 123456789012345679 # Placeholder: Replace with actual Welcome channel ID
 VERIFICATION_EMOJI = '✅'
 
+# Global variable to track bot start time for !status
+BOT_START_TIME = time.time()
+
 # Intents are mandatory for modern discord bots to declare what events they listen to.
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True # <-- CLEANED: This line caused the SyntaxError
+intents.members = True
 intents.presences = True
 intents.reactions = True
 
-# Initialize the bot client
+# Initialize the bot client (GND Manager)
 bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents)
 
 # --- MODERATION LOGIC (mod_logs.json) ---
@@ -70,8 +74,10 @@ def log_action(user_id, moderator_id, action, reason):
 @bot.event
 async def on_ready():
     """Confirms the bot is connected and operational."""
+    global BOT_START_TIME
+    BOT_START_TIME = time.time() # Ensure the start time is set/reset on connection
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
-    print('Housemate Ryker is online and monitoring the neighborhood.')
+    print('GND Manager is online and monitoring the neighborhood.')
 
 @bot.event
 async def on_member_join(member):
@@ -87,7 +93,7 @@ async def on_member_join(member):
             # Log the re-ban action
             log_action(member.id, bot.user.id, 'AUTO_REBAN', 'Attempted Ban Evasion')
         except discord.Forbidden:
-            print("Error: Bot does not have permission to ban the user for evasion.")
+            print("Error: GND Manager does not have permission to ban the user for evasion.")
 
     # 2. Verification Reminder (If not already banned)
     else:
@@ -124,7 +130,7 @@ async def on_raw_reaction_add(payload):
             if channel:
                  await channel.send(f"Welcome aboard, {member.mention}! You've been verified and unlocked the rest of the neighborhood.", delete_after=10)
         except discord.Forbidden:
-            print("Error: Bot lacks permissions to assign the Member role.")
+            print("Error: GND Manager lacks permissions to assign the Member role.")
 
 
 @bot.event
@@ -141,7 +147,7 @@ async def on_message(message):
             # Send a temporary removal notice
             warning_msg = await message.channel.send(f"{message.author.mention}, that link has been removed by the Neighborhood Watch filter. Please use designated channels for promotion.", delete_after=8)
         except discord.Forbidden:
-            print("Error: Bot lacks permissions to delete messages.")
+            print("Error: GND Manager lacks permissions to delete messages.")
         return # Stop processing to prevent command check
 
     # 2. Process commands
@@ -161,7 +167,7 @@ def is_admin():
 @bot.command(name='say')
 @is_admin()
 async def say_command(ctx, channel: discord.TextChannel, *, message):
-    """Ryker's Bulletin: Securely posts a clean message to a specified channel."""
+    """Manager's Bulletin: Securely posts a clean message to a specified channel."""
     await ctx.message.delete()
     await channel.send(message)
     print(f"Admin message sent to #{channel.name} by {ctx.author.name}")
@@ -325,6 +331,166 @@ async def report_command(ctx, member: discord.Member, *, reason):
     else:
         # Fallback if mod channel isn't configured correctly
         await ctx.author.send("🚨 Error: The moderator alert channel is not configured correctly. Please notify an Admin manually.")
+
+# --- USER COMMANDS (Manager Utilities) ---
+
+@bot.command(name='status')
+async def status_command(ctx):
+    """The Premises Report: Displays the Manager's health (uptime and latency)."""
+    # Calculate uptime
+    current_time = time.time()
+    difference = int(round(current_time - BOT_START_TIME))
+    uptime = str(timedelta(seconds=difference))
+
+    # Calculate latency (ping)
+    latency = round(bot.latency * 1000, 2) # Latency in milliseconds
+    
+    embed = discord.Embed(
+        title="📈 GND Manager: Premises Report",
+        description="The system is running smoothly and monitoring operations.",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="🛰️ Latency (Ping)", value=f"{latency} ms", inline=True)
+    embed.add_field(name="⏱️ Uptime", value=uptime, inline=True)
+    embed.set_footer(text=f"Requested by {ctx.author.display_name}")
+    
+    await ctx.send(embed=embed)
+
+
+@bot.command(name='rules')
+async def rules_command(ctx):
+    """The Lease Agreement: Provides a quick summary of essential server rules."""
+    
+    rules_content = """
+    | Rule | Summary | Consequence |
+    | :--- | :--- | :--- |
+    | **18+ ONLY** | You must be 18 years of age or older to be in the community. | Permanent Ban |
+    | **Respect** | Treat all members with courtesy; no harassment or hate speech. | Moderation Action |
+    | **No Unsolicited DMs** | Do not send unwanted private messages to other members. | Moderation Action |
+    | **Content** | All content must adhere to Discord ToS and legal standards. | Immediate Ban |
+    | **Promotion** | Self-Promotion is **only** allowed in the designated channel. | Warning/Deletion |
+    | **Moderators** | Follow all instructions from the moderation team. | Moderation Action |
+    """
+
+    embed = discord.Embed(
+        title="📜 The Lease Agreement (Quick Rules)",
+        description="The essential rules for maintaining a safe and respectful neighborhood.",
+        color=discord.Color.light_grey()
+    )
+    # The markdown table is added directly to a field
+    embed.add_field(name="Core Conduct Guidelines", value=rules_content, inline=False)
+    embed.set_footer(text="If you need to report a violation, use !report @user [reason].")
+    
+    await ctx.send(embed=embed)
+
+
+@bot.command(name='invite')
+async def invite_command(ctx):
+    """The Key: Generates a permanent invite link to share the community."""
+    
+    # Using the static invite link provided by the user
+    INVITE_LINK = "https://discord.gg/EKekh3wHYQ" 
+    
+    embed = discord.Embed(
+        title="🔑 Share the Key",
+        description="Invite your friends to the Neighborhood!",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Permanent Invitation Link", value=f"[Click here to join the community!]({INVITE_LINK})", inline=False)
+    embed.set_footer(text="Thanks for helping us grow the neighborhood!")
+    
+    await ctx.send(embed=embed)
+
+
+@bot.command(name='serverstats')
+async def serverstats_command(ctx):
+    """The Ledger: Displays robust activity and administrative data points."""
+    
+    # --- NOTE: This is MOCK DATA, ready to be replaced with real database queries ---
+    # Future development involves calculating these metrics from a database (e.g., Firestore).
+    
+    # Fetch guild member counts
+    member_count = ctx.guild.member_count
+    
+    # Mock Statistics
+    total_messages_24h = "3,450" # Placeholder
+    avg_daily_messages = "4,120" # Placeholder
+    most_active_channel = "#main-chat (38% activity)" # Placeholder
+    new_members_last_week = "74" # Placeholder
+    total_mod_actions = len(load_mod_logs()) # Uses existing log data
+
+    embed = discord.Embed(
+        title="📊 The Ledger: Neighborhood Statistics",
+        description=f"Comprehensive data monitored by GND Manager on the server's health and activity.",
+        color=discord.Color.dark_purple()
+    )
+    
+    embed.add_field(name="🏘️ Current Population", value=f"{member_count} Members", inline=True)
+    embed.add_field(name="💬 Messages (Last 24h)", value=total_messages_24h, inline=True)
+    embed.add_field(name="📈 Average Daily Chat", value=avg_daily_messages, inline=True)
+
+    embed.add_field(name="🔥 Most Active Channel", value=most_active_channel, inline=True)
+    embed.add_field(name="🆕 New Members (Last 7d)", value=new_members_last_week, inline=True)
+    embed.add_field(name="🚨 Total Mod Actions", value=total_mod_actions, inline=True)
+
+    embed.set_footer(text="GND Manager is currently tracking these metrics for expansion.")
+    
+    await ctx.send(embed=embed)
+
+
+@bot.command(name='schedule')
+async def schedule_command(ctx):
+    """Official Weekly Schedule: Displays all content drops and community events."""
+
+    embed = discord.Embed(
+        title="📅 Official Weekly Schedule & Events",
+        description="Here is the complete schedule for all content, streams, and community events.",
+        color=discord.Color.red()
+    )
+
+    embed.add_field(
+        name="💻 Content & Streams",
+        value=(
+            "**Saturday (7-10 PM Central):** 🛋️ Cam Stream on Chaturbate\n"
+            "**Sunday (Weekly Drop):** 🎥 New Video Drop on PornHub\n"
+            "**Mondays (Anytime):** 💎 Discord Exclusive Drop in #content-drops"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🏘️ Community Events (Discord Exclusive)",
+        value=(
+            "**Tuesday:** 🗳️ Weekly Poll in #polls\n"
+            "**Wednesday:** 🏠 House Meeting (Q&A/Hangout) in Stage Channel (Time announced in #stream-alerts)"
+        ),
+        inline=False
+    )
+    
+    embed.set_footer(text="⚡ Bonus Streams are announced by 6 PM Central in #stream-alerts.")
+    
+    await ctx.send(embed=embed)
+
+
+@bot.command(name='links')
+async def links_command(ctx):
+    """Links: Provides all essential content platform links."""
+
+    embed = discord.Embed(
+        title="🔗 Manager's Links & Platform Support",
+        description="Access all our platforms and support links here.",
+        color=discord.Color.gold()
+    )
+    
+    embed.add_field(name="Main Website", value="[guysnextdoor.netlify.app](https://guysnextdoor.netlify.app)", inline=False)
+    embed.add_field(name="Chaturbate", value="[chaturbate.com/hotcockjock99](https://chaturbate.com/hotcockjock99)", inline=False)
+    embed.add_field(name="PornHub", value="[pornhub.com/model/guysnextdoor](https://pornhub.com/model/guysnextdoor)", inline=False)
+    embed.add_field(name="Discord Invite", value="[discord.gg/EKekh3wHYQ](https://discord.gg/EKekh3wHYQ)", inline=False)
+    embed.add_field(name="Tip Jar", value="**COMING SOON**", inline=False)
+    
+    embed.set_footer(text="Thank you for your support!")
+    
+    await ctx.send(embed=embed)
 
 # --- BOT RUNNER FUNCTION ---
 
