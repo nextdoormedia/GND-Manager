@@ -12,14 +12,42 @@ Ryker is built around the philosophy of low-maintenance, high-engagement communi
 
 | Feature | Description | On-Brand Terminology |
 | :--- | :--- | :--- |
-| **Verification System** | Automatically grants the **Member** role to users who successfully react to the designated rules message, controlling initial server access and preventing bot spam. | `New Neighbor Welcome` |
+| **Vibe Raffle System** | All Vibe spent in the shop is pooled into a jackpot ('Free Parking') that is randomly drawn using purchased raffle tickets, keeping Vibe in the economy. | `The Vibe Free Parking Jackpot` |
+| **Verification System** | Automatically grants the **Member** role to users who successfully react to the designated rules message, controlling initial server access and preventing bot spam. Includes the **!verify** redundancy command. | `New Neighbor Welcome` |
 | **Vibe (XP) System** | Rewards users for sending messages with a random small amount of Vibe points (1-3 Vibe points). Includes a **15-second cooldown** to prevent channel spamming and ensure fair distribution of rewards. | `Moving Up The Block` |
-| **Automatic Leveling** | Assigns and removes cosmetic rank roles when a member reaches a new Vibe milestone, promoting constant, visible progress across the community. | `Neighborhood Ranks` |
-| **Vibe Economy** | Allows users to spend earned Vibe on custom flair, nickname icons, and specialized access via the `!shop` command, adding intrinsic value to activity. | `Vibe Shop` |
-| **Prestige System** | Rewards highly active members who reach the Vibe cap (`Block Captain`) by resetting their Vibe to zero and granting a permanent `Legacy Resident` tier. This incentivizes continuous, long-term participation. | `Graduating to Legacy` |
+| **Automatic Leveling** | Assigns and removes cosmetic rank roles when a member reaches a new Vibe milestone. Nicknames are also updated with purchased **Icons (Prefix)** and **Flairs (Suffix)**. | `Neighborhood Ranks & Flairs` |
+| **Vibe Economy** | Allows users to spend earned Vibe on custom cosmetics and specialized access via the `!shop` command. | `Vibe Shop` |
+| **Prestige System** | Rewards highly active members who reach the Vibe cap (`Block Captain`) by resetting their Vibe to zero and granting a permanent `Legacy Resident` tier. | `Graduating to Legacy` |
+| **Disciplinary Alerts** | Automatically logs all membership changes (leaves/bans) and administrative Vibe deductions to the Mod Alerts Channel for full oversight. | `Neighborhood Watch Logs` |
+| **Data Integrity** | Bot data is saved every 5 minutes and after every transaction, ensuring user progress is protected against reboots or crashes. | `Always Saving Progress` |
 | **Confidential Reporting** | Allows users to privately and anonymously report rule-breakers directly to the **Mod Alerts Channel** via DM using the `!report` command, protecting the reporter's identity. | `House Safety Report` |
-| **Content Filters** | Automatically deletes messages containing known promotional links, specific spam keywords, or explicitly forbidden content, while alerting the user. This is a critical first layer of brand protection. | `Keeping the Neighborhood Clean` |
+| **Content Filters** | Automatically deletes messages containing known promotional links, specific spam keywords, or explicitly forbidden content, while alerting the user. | `Keeping the Neighborhood Clean` |
 | **Uptime Management** | Runs a Flask web server in a background thread to satisfy the hosting service's health checks, guaranteeing continuous 24/7 uptime. | `Always Home` |
+
+---
+
+## 📋 Full Command Reference
+
+| Command | Category | Description |
+| :--- | :--- | :--- |
+| **`!profile`** | **Economy** | Displays your current Vibe score, Rank, Daily Streak, Legacy Tier, and Nickname Cosmetics. |
+| **`!daily`** | **Economy** | Claim your daily Vibe reward and increase your streak bonus. |
+| **`!rank`** | **Economy** | Shows your current rank tier and Vibe required for the next rank. |
+| **`!leaderboard`** | **Economy** | Displays the top 10 Vibe earners in the neighborhood. |
+| **`!shop`** | **Economy** | Lists all items available for purchase with Vibe. |
+| **`!buy [ID]`** | **Economy** | Purchases an item from the Vibe Shop. Vibe spent is added to the Raffle Pool. |
+| **`!gift [member] 50`** | **Economy** | Purchases and instantly sends 50 Vibe to another member at a cost of 300 Vibe. |
+| **`!prestige`** | **Economy** | Resets your Vibe score to 0 to earn the next permanent Legacy Resident Tier. |
+| **`!report [member] [reason]`** | **Community** | Confidential report command; sends an anonymous alert to the Mod Alerts Channel. |
+| **`!verify`** | **Utility** | **Redundancy command** to grant the Member role if the reaction fails. |
+| **Admin `!raffle_draw`** | **Administration** | **CRITICAL:** Draws the winner from the Vibe Pool, distributes the prize, and handles rollover logic. |
+| **Admin `!deduct_vibe [member] [amount] [reason]`**| **Administration** | Deducts Vibe from a user for disciplinary reasons and logs the action to Mod Alerts. |
+| **Admin `!set_vibe [member] [amount]`** | **Administration** | Manually sets a member's Vibe score and forces a rank update. |
+| **Admin `!set_icon [member] [emoji]`** | **Administration** | Sets a short emoji icon (prefix) for a member's nickname. |
+| **Admin `!set_flair [member] [text]`** | **Administration** | Sets a short text flair (suffix) for a member's nickname. |
+| **Admin `!clear_flair [member]`** | **Administration** | Removes the custom text flair from a member's nickname. |
+| **Admin `!update_ranks [member]`** | **Administration** | Force re-checks and re-applies all rank roles and nickname cosmetics for a member. |
+| **Admin `!say [channel] [message]`** | **Administration** | Posts a message as the bot to a specified channel. |
 
 ---
 
@@ -32,8 +60,8 @@ For Ryker to function correctly, the **Control Panel** in the code and the **Dis
 The operational settings are contained in simple variables at the very top of the `housemate_ryker.py` file. This top section is your primary non-technical interface for managing the bot's behavior.
 
 * **CRUCIAL IDs:** You must manually update all **CHANNEL IDs** (e.g., Mod Alerts) and the **VERIFICATION MESSAGE ID** by copying them directly from Discord's developer mode. Ryker uses these IDs to know exactly where to watch for reactions, send reports, and post moderator alerts.
-* **Tuning the Economy:** All Vibe reward amounts, the anti-spam 15-second cooldown, and the filter keywords are set here. This centralized control allows you to quickly adjust the server economy (e.g., make ranks easier or harder to attain) or update filter terms without touching any functional code.
-* **Data Persistence:** The bot automatically saves all user Vibe, Streak, and Cosmetic data into a file called `vibe_data.json`. This **JSON database** is essential for persistence; it ensures that all user progress is safely stored and reloaded even if the hosting service reboots Ryker.
+* **Raffle Control:** New constants (`MIN_RAFFLE_POOL`, `MAX_RAFFLE_POOL`) control the jackpot size and ensure the raffle only draws when the prize is meaningful.
+* **Data Persistence:** The bot automatically saves all user Vibe, Streak, and Cosmetic data, as well as the **Raffle Pool data** (under the `GLOBAL_RAFFLE_DATA` key) into a single file called `vibe_data.json`. This centralized **JSON database** is essential for persistence.
 
 ### 2. Discord Role Setup (Must Match Exactly!)
 
@@ -66,11 +94,13 @@ Use this comprehensive table to quickly verify that all core features, filters, 
 | **Verification System** | React to the Rules message (ID set in config) with the **✅** emoji. | You are instantly granted the **Member** role and gain visibility to the general channels. The bot should not post any public message. |
 | **Core Vibe Earning** | Send one message. Wait **15 seconds**. Send a second message. | Both messages stay. **Crucial Check:** You should only get Vibe from the **second message**, confirming the cooldown logic is correctly preventing spam rewards. |
 | **Daily Streak** | Type: `!daily` | **(1)** A successful embed appears confirming Vibe added, and the streak counter increases. **(2)** Run `!daily` immediately again: bot sends an error about the time/date, confirming the 24-hour reset is enforced. |
-| **Admin Setup: Give Vibe** | `!vibe_penalty @YourUsername 5000` (Use a **positive** number to simulate massive earning). | **(1)** Bot replies: *Vibe Penalty Applied...* **(2)** Your cosmetic rank automatically updates to the highest basic rank (`Block Captain`). |
-| **Admin Setup: Remove Rank** | `!vibe_penalty @YourUsername -4500` (Removes Vibe to drop below the current rank threshold). | **Crucial Check:** The bot successfully removes the higher cosmetic rank (e.g., `Block Captain`) and assigns the appropriate lower rank based on the new total. |
+| **Admin Setup: Give Vibe** | `!set_vibe @YourUsername 5000` | **(1)** Bot replies: *Set Vibe for...* **(2)** Your cosmetic rank automatically updates to the highest basic rank (`Block Captain`). |
+| **Admin Setup: Deduct Vibe** | `!deduct_vibe @YourUsername 100 Testing disciplinary alert.` | **(1)** Bot replies: *Deducted 100 Vibe...* **(2) Crucial Check:** A red **Vibe Deduction Alert** embed appears in the Mod Alerts Channel, logging the action and moderator. |
+| **Admin Setup: Nickname Flair** | `!set_flair @YourUsername 🏠` then `!set_flair @YourUsername [Text]` | **(1)** Nickname updates to show `🏠` as a prefix. **(2)** Nickname updates to show `[Text]` as a suffix. **(3)** Use `!clear_flair` to remove the suffix. |
 | **Prestige Command** | Ensure Vibe is over the cap (e.g., 2000). Type: `!prestige` | **(1)** Bot confirms reset, setting Vibe to `0`. **(2)** The bot grants the permanent `Legacy Resident I` role. Run `!profile` to verify Vibe is 0 but the Legacy role is present. |
 | **Confidential Report** | In a **DM with the bot**, type: `!report @NeighborName Test Reason` | The bot sends a confirmation to your DMs, and a **User Report** embed appears in the **Mod Alerts Channel**. **Check:** Your username should *not* be in the Mod Alerts embed (confirming anonymity). |
-| **Purchase Log** | Type: `!buy 1` | **(1)** Bot replies: *PURCHASE SUCCESSFUL!* **(2)** A yellow/red alert embed appears in the **Mod Alerts Channel** detailing the purchase for manual fulfillment. |
+| **Purchase Log** | Type: `!buy 5` (A manual fulfillment item). | **(1)** Bot replies: *Purchase Complete...* **(2) Crucial Check:** A yellow/red alert embed appears in the **Mod Alerts Channel** detailing the purchase AND confirming the cost was added to the Raffle Pool. |
+| **Raffle Pool & Draw** | **Setup:** Have at least one person buy `!buy 11`. **Action:** `!raffle_draw` | **(1)** Bot announces the winner in the designated channel. **(2)** Winner's Vibe is increased by the jackpot amount. **(3)** The Raffle Pool resets, retaining any rollover amount. |
 | **Spam Link Filter** | Send a message containing a suspicious link: `Check this out: bit.ly/spamurl` | **(1) Your message is immediately deleted.** **(2)** The bot briefly posts a temporary **removal notice** in the channel and notifies the user via DM (if DM is open). |
 | **Admin Announcement** | `!say #general **This is an announcement.**` | Your command message is **deleted**, and the bot posts the bolded message to the `#general` channel, validating your moderator authority. |
 
