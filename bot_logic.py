@@ -3,6 +3,53 @@ from discord.ext import commands
 from datetime import datetime
 import os, random, json, time, asyncio
 
+# --- INTENTS SETUP (CRITICAL!) ---
+# Declare all necessary intents, especially the privileged ones
+intents = discord.Intents.default()
+# Required for Vibe system, user roles, and managing members
+intents.members = True          
+# CRITICAL for prefix commands (like !say) and on_message filters
+intents.message_content = True  
+
+# --- BOT INITIALIZATION ---
+# Pass the explicit intents to the Bot constructor
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+Month!")
+
+# --- GLOBAL COMMAND ERROR HANDLER ---
+@bot.event
+async def on_command_error(ctx, error):
+    # This prevents handling errors at the command level if they are ignored
+    if hasattr(ctx.command, 'on_error'):
+        return
+
+    # User Permission Check Failure
+    if isinstance(error, commands.MissingPermissions):
+        missing = [p.replace('_', ' ').title() for p in error.missing_permissions]
+        await ctx.send(f"❌ **User Error:** You need the following permission(s) to use this command: **{', '.join(missing)}**")
+        return
+
+    # Bot Permission Check Failure (This is the one we really need!)
+    if isinstance(error, commands.BotMissingPermissions):
+        missing = [p.replace('_', ' ').title() for p in error.missing_permissions]
+        await ctx.send(f"⚠️ **Bot Error:** I am missing the following permission(s) to run this command: **{', '.join(missing)}**. Please check my role hierarchy and channel overrides.")
+        return
+    
+    # Missing Argument Failure (e.g., typing !say without a channel)
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"❌ **Syntax Error:** Missing required argument: `{error.param.name}`. Correct usage is `!say #channel_name Your Message`")
+        return
+
+    # Target Not Found (e.g., trying to use !say on a channel that doesn't exist)
+    if isinstance(error, commands.ChannelNotFound):
+        await ctx.send(f"❌ **Channel Not Found:** I couldn't find the channel you specified. Please make sure the channel name is correct.")
+        return
+    
+    # For any other unexpected error, print to the console for debugging
+    print(f"Ignoring exception in command {ctx.command}:")
+    raise error
+
 # --- CONFIGURATION CONSTANTS ---
 DATABASE_FILE = "vibe_data.json"
 COOLDOWN_SECONDS = 15
@@ -261,37 +308,4 @@ async def report(ctx, member: discord.Member, *, reason: str):
 
 @bot.command()
 async def nom_vote(ctx, member: discord.Member):
-    await ctx.send(f"✅ You voted for **{member.display_name}** for Neighbor of the Month!")
-
-# --- GLOBAL COMMAND ERROR HANDLER ---
-@bot.event
-async def on_command_error(ctx, error):
-    # This prevents handling errors at the command level if they are ignored
-    if hasattr(ctx.command, 'on_error'):
-        return
-
-    # User Permission Check Failure
-    if isinstance(error, commands.MissingPermissions):
-        missing = [p.replace('_', ' ').title() for p in error.missing_permissions]
-        await ctx.send(f"❌ **User Error:** You need the following permission(s) to use this command: **{', '.join(missing)}**")
-        return
-
-    # Bot Permission Check Failure (This is the one we really need!)
-    if isinstance(error, commands.BotMissingPermissions):
-        missing = [p.replace('_', ' ').title() for p in error.missing_permissions]
-        await ctx.send(f"⚠️ **Bot Error:** I am missing the following permission(s) to run this command: **{', '.join(missing)}**. Please check my role hierarchy and channel overrides.")
-        return
-    
-    # Missing Argument Failure (e.g., typing !say without a channel)
-    if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"❌ **Syntax Error:** Missing required argument: `{error.param.name}`. Correct usage is `!say #channel_name Your Message`")
-        return
-
-    # Target Not Found (e.g., trying to use !say on a channel that doesn't exist)
-    if isinstance(error, commands.ChannelNotFound):
-        await ctx.send(f"❌ **Channel Not Found:** I couldn't find the channel you specified. Please make sure the channel name is correct.")
-        return
-    
-    # For any other unexpected error, print to the console for debugging
-    print(f"Ignoring exception in command {ctx.command}:")
-    raise error
+    await ctx.send(f"✅ You voted for **{member.display_name}** for Neighbor of the 
