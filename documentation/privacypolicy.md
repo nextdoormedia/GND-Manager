@@ -1,39 +1,31 @@
-# 🔒 Privacy Policy
+# 🔒 Privacy Policy: Simple & Transparent
 
-This policy details how your data is collected and managed by our custom system, **Housemate Ryker**, ensuring transparency and security.
+Effective Date: September 27, 2025
 
-### 2.1 Data Collection and Storage
+Your privacy is a top priority. This simple policy clearly explains what minimal data we collect and, most importantly, what we absolutely do not do with your information across our website, streams, and the Discord server.
 
-Our custom bot, **Housemate Ryker**, collects and stores the following non-personal data for community management purposes:
+## 1. What We Collect (Minimum Data)
 
-* **Discord User ID:** This numerical ID is the minimum required data to uniquely identify you for rank tracking.
+We only collect the data necessary to run the community, reward activity, and respond to your messages.
 
-* **Vibe (XP) Points:** Tracks your activity level for the "Moving Up The Block" leveling system.
+| Where it's Collected | What We Collect | Why We Collect It |
+| :--- | :--- | :--- |
+| **Discord Server** (Housemate Ryker Bot) | Discord User ID, Vibe (XP) Points, Daily Streak, Prestige Tier, Nickname Cosmetics. | To uniquely identify you, manage the Vibe/Rank system, and fulfill your Vibe Shop purchases. |
+| **Confidential Reports** (DM/Channel) | Reporter's Discord User ID. | Used only for moderator verification that the report is genuine. |
+| **Contact Form** (Website) | Name, Email, Subject, Message. | Used solely to reply to your message. |
+| **Website/General Logs** | Anonymized IP addresses and browser type. | Used temporarily (max 30 days) for security and debugging. |
 
-* **Last Message Timestamp:** Records the last time you earned Vibe to enforce the **15-second cooldown** and prevent spam.
+## 2. Our Promise: What We DON'T DO
 
-### 2.2 Data Usage
+Your anonymity and trust are paramount.
 
-The collected data is used exclusively within this server to:
+* We **DO NOT** sell, share, or transfer your User ID, Vibe data, or contact information to any external companies, advertisers, or third parties.
+* We **DO NOT** use tracking cookies on our website.
+* We only use your data internally to run and secure the Neighborhood.
 
-* Manage the Vibe (XP) and leveling system.
+## 3. Your Control: Data Removal
 
-* Automate the assignment and removal of cosmetic "Neighborhood Rank" roles.
+You have the power to request that your information be deleted at any time.
 
-* Display leaderboards (`!leaderboard`) and individual rank status (`!rank`).
-
-### 2.3 Message Content
-
-**Housemate Ryker** does **not** permanently store the content of your messages. It only processes messages to count them for Vibe rewards and to check for command prefixes (e.g., `!rank`).
-
-### 2.4 Data Retention and Removal
-
-* **Retention:** Data (User ID, Vibe, Timestamp) is retained while you are a member of the server to ensure rank continuity.
-
-* **Removal:** Upon leaving the server, your collected Vibe data will be marked for eventual deletion. If you wish to have your data permanently and immediately deleted from our database, please contact an administrator.
-
-### 2.5 Data Sharing
-
-We do not share your User ID, Vibe data, or any other collected information with any external third parties, including advertisers or other Discord servers.
-
-*Last Updated: September 26, 2025*
+* **Contact Data:** If you use the contact form, you can request that we immediately delete your name and email history.
+* **Discord Bot Data:** If you leave the server, your Vibe and User ID data will be marked for deletion. You can request immediate and permanent deletion by messaging an administrator directly.
