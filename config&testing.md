@@ -1,22 +1,22 @@
 * * *
-\# Housemate Ryker: Companion Guide for Non-Coders 🛠️
+# Housemate Ryker: Companion Guide for Non-Coders 🛠️
 
 This document serves as your complete, non-technical guide for managing, configuring, and testing *Housemate Ryker*. It is optimized for minimal setup and assumes no prior coding experience.
 
 * * *
 
-\#\# 1. Detailed Instructions \& Setup (The Control Panel)
+## 1. Detailed Instructions \& Setup (The Control Panel)
 
 Before testing, you must ensure the server environment is correctly set up. These are the *only* management tasks required outside of the bot's Python code.
 
-\#\#\# 1.1. ⚙️ Bot Configuration: The Top of the Script
+### 1.1. ⚙️ Bot Configuration: The Top of the Script
 
 All bot settings (like Vibe amounts, channels, and forbidden words) are controlled by simple text variables at the very top of the **housemate_ryker.py** file. Think of this section as your *Bot Control Panel*.
 
 * **Crucial:** You must ensure the **CHANNEL IDs** are correct for your server (e.g., `WELCOME_CHANNEL_ID`, `MOD_ALERTS_CHANNEL_ID`).
 * **Tuning:** If you ever want to change how much Vibe users earn or the shop prices, you only need to change the numbers in this top section. *No other code changes are necessary.*
 
-\#\#\# 1.2. 👑 Discord Role Setup (Critical!)
+### 1.2. 👑 Discord Role Setup (Critical!)
 
 The bot grants, removes, and manages all ranks automatically, but the roles **must** be created in your Discord server first. They must match the names exactly.
 
@@ -25,7 +25,7 @@ The bot grants, removes, and manages all ranks automatically, but the roles **mu
 | **Basic Ranks** | `New Neighbor`, `Familiar Face`, `Resident`, `Housemate`, `Block Captain` | Granted automatically based on Vibe total. |
 | **End-Game Ranks** | `Legacy Resident I`, `Legacy Resident II`, `Legacy Resident III` (and so on) | Permanent roles granted after a user uses `!prestige`. |
 
-\#\#\# 1.3. 🔑 Hosting Security (The Only Code-Adjacent Task)
+### 1.3. 🔑 Hosting Security (The Only Code-Adjacent Task)
 
 The bot runs 24/7 on a service like Render. The only thing you need to manage for deployment is a single secret code, the **Discord Bot Token**.
 
@@ -33,7 +33,7 @@ The bot runs 24/7 on a service like Render. The only thing you need to manage fo
 
 * * *
 
-\#\# 2. Housemate Ryker: Simplified Manual Testing Guide
+## 2. Housemate Ryker: Simplified Manual Testing Guide
 
 Use this table to quickly verify that all core features and rule enforcements are working correctly in your server.
 
