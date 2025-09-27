@@ -1,4 +1,4 @@
-\# 🏡 Housemate Ryker: The GuysNextDoor Community Manager
+# 🏡 Housemate Ryker: The GuysNextDoor Community Manager
 
 Housemate Ryker is a custom-built Discord bot designed for the GuysNextDoor community. Its primary function is to automate moderation, drive member engagement, and provide a stable, feature-rich environment.
 
@@ -6,7 +6,7 @@ This bot is engineered for 24/7 uptime using a **Web Service** hosting model to 
 
 ---
 
-\#\# ✨ Core Features (Vibe Economy 2.0)
+## ✨ Core Features (Vibe Economy 2.0)
 
 Housemate Ryker now runs a complete, persistent economy with user customization and strong moderation tools:
 
@@ -21,7 +21,7 @@ Housemate Ryker now runs a complete, persistent economy with user customization 
 
 ---
 
-\#\# 📈 Neighborhood Ranks and Prestige Tiers
+## 📈 Neighborhood Ranks and Prestige Tiers
 
 The bot manages and grants the following cosmetic roles automatically. The Vibe threshold has been increased to support the new economy.
 
@@ -37,7 +37,7 @@ Prestige Tiers: **Legacy Resident I**, **Legacy Resident II**, etc. (Permanent s
 
 ---
 
-\#\# 🤖 User Commands
+## 🤖 User Commands
 
 | Command | Category | Description |
 | :--- | :--- | :--- |
@@ -52,7 +52,7 @@ Prestige Tiers: **Legacy Resident I**, **Legacy Resident II**, etc. (Permanent s
 
 ---
 
-\#\# 🛡️ Administrative Commands (Moderator Use)
+## 🛡️ Administrative Commands (Moderator Use)
 
 | Command | Purpose | Fulfillment Type |
 | :--- | :--- | :--- |
@@ -64,7 +64,7 @@ Prestige Tiers: **Legacy Resident I**, **Legacy Resident II**, etc. (Permanent s
 
 ---
 
-\#\# ⚙️ Setup and Deployment
+## ⚙️ Setup and Deployment
 
 This project remains configured for 24/7 deployment on **Render** as a **Web Service**.
 
