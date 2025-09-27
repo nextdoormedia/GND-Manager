@@ -1,33 +1,43 @@
-# 📜 Terms of Service (TOS)
+# 📜 Terms of Service: Neighborhood Rules
 
-This document outlines the non-negotiable standards for participation in The GuysNextDoor community and protects the community environment and the server owner (GuysNextDoor).
+Effective Date: September 27, 2025
 
-### 1.1 Acceptance and Modifications
+Welcome to the GuysNextDoor (GND) Platforms (website, streams, and Discord)! By accessing or using any of our services, you agree to these simple rules.
 
-Verification by reacting to the rules message constitutes acceptance of this ToS. The server owner reserves the exclusive right to modify these terms at any time. Continued use of the server after modifications signifies your acceptance of the new terms.
+## 1. Mandatory Rule: You Must Be 18+
 
-### 1.2 Required User Conduct (Acceptable Use)
+This is the most critical rule. All users of GND Platforms **must be 18 years of age or older.**
 
-Users are expected to contribute positively to the "neighborhood" environment. The following conduct is strictly **prohibited**:
+* **Your Confirmation:** By continuing to use our services, you confirm that you meet this age requirement.
+* **Discord Verification:** For the Discord server, reacting with the **✅** emoji to the rules message confirms your acceptance of this ToS.
+* **Violations:** If you are found to be underage, your access to all platforms will be immediately and permanently revoked.
 
-* **Harassment and Hate Speech:** Any form of targeted harassment, discrimination, or hate speech based on identity, orientation, or belief.
+## 2. Protecting Our Content (Copyright)
 
-* **Illegal/Explicit Content:** Sharing links or media depicting illegal acts, non-consensual content, or excessive gore.
+Everything Eric & Caleb create is our protected property (GND Content).
 
-* **Doxxing/Threats:** Posting private information about any user or moderator, or issuing direct or implied threats of violence or harm.
+* **No Sharing or Copying:** You are strictly prohibited from downloading, screen-capturing, recording, selling, or sharing any part of the GND Content without written permission.
+* **Consequences:** Unauthorized sharing is a violation of this agreement and will lead to an immediate, permanent ban.
 
-* **Spam and Advertising:** Repeatedly posting disruptive content, unsolicited advertisements, or harmful links.
+## 3. Good Neighborhood Conduct
 
-### 1.3 Content Sharing and Intellectual Property
+We expect everyone to contribute positively to the community environment.
 
-* **Ownership:** You warrant that you have the necessary rights to any content you share on the server.
+* **Be Respectful:** No targeted harassment, hate speech, doxxing, or discrimination against anyone.
+* **Illegal Content:** Sharing content depicting illegal acts or non-consensual material is strictly prohibited everywhere. **NOTE:** While content filters may be disabled in Age-Restricted channels, this rule against illegal material is **always enforced**.
+* **Confidential Reporting:** You are encouraged to use the `!report` command to report rule-breakers. Abuse of the reporting system to harass others is a violation of this ToS.
+* **Self-Promotion:** All promotional links must be kept in the designated `#self-promo` channel.
+* **Owners Have Final Say:** The GuysNextDoor team has the final word on rule enforcement (warnings, mutes, or permanent bans).
 
-* **Prohibited Material:** Unauthorized sharing, distribution, or linking of copyrighted, private, or proprietary content owned by others (including the server owner, GuysNextDoor) is strictly forbidden and is grounds for immediate, permanent ban.
+## 4. The Vibe Economy (Housemate Ryker Bot)
 
-### 1.4 Moderation Authority and Enforcement
+The Vibe System, Ranks, and Vibe Shop are cosmetic reward systems run by the **Housemate Ryker** bot.
 
-* **Final Authority:** The server owner and appointed administrators hold **final and absolute authority** in all matters of rule interpretation and disciplinary action.
+* **No Value:** Vibe and Prestige Tiers have **no real-world monetary value** and cannot be bought or sold for money.
+* **Final Sales:** All purchases made in the **Vibe Shop** using the `!buy` command are final, non-refundable, and subject to moderator fulfillment.
+* **Revocation:** Vibe points, Ranks, Prestige Tiers, and shop purchases can be revoked by moderators as part of a disciplinary action.
 
-* **Disciplinary Action:** Violations may result in warnings, temporary mutes/bans, permanent bans, and removal from the server at the sole discretion of the moderator team. The loss of Vibe points and cosmetic roles may accompany disciplinary action.
+## 5. Legal Protection (Disclaimer)
 
-* **Appeals:** Appeals must be submitted privately to a moderator or administrator designated for that purpose. Public appeals or attempts to circumvent bans will result in the immediate rejection of the appeal.
+* **"AS IS" Service:** The platforms are provided exactly "as is," without guarantees that they will always be perfect or error-free.
+* **Limited Liability:** You use these platforms at your own risk. The owners are not responsible for any content posted by other users or for any damages resulting from your use of the platforms.
