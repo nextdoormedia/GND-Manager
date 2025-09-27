@@ -3,6 +3,23 @@ from discord.ext import commands
 from datetime import datetime
 import os, random, json, time, asyncio
 
+# --- CONFIGURATION CONSTANTS (MOVED TO TOP FOR PROPER VARIABLE SCOPE) ---
+DATABASE_FILE = "vibe_data.json"
+COOLDOWN_SECONDS = 15
+MAX_VIBE_FOR_PRESTIGE = 2000
+DAILY_VIBE_BASE = 50
+DAILY_VIBE_STREAK_BONUS = 5
+VIBE_PER_MESSAGE = (1, 3) 
+WELCOME_CHANNEL_ID = 1420121916404007136 # REPLACE ME
+MOD_ALERTS_CHANNEL_ID = 1420127688248660081 # REPLACE ME
+SELF_PROMO_CHANNEL_NAME = "self-promo"
+FILTERED_KEYWORDS = ["illegal content", "graphic violence", "shock video", "dtxduo impersonation", "official admin", "mod giveaway"]
+SPAM_LINKS = ["bit.ly", "tinyurl", "ow.ly", "shorte.st"]
+PROMOTION_KEYWORDS = ["subscribe", "patreon", "youtube", "twitch", "onlyfans", "my channel", "check out my"]
+VIBE_RANKS = {"New Neighbor": 0, "Familiar Face": 100, "Resident": 250, "Housemate": 500, "Block Captain": MAX_VIBE_FOR_PRESTIGE}
+VIBE_SHOP_ITEMS = {1: {"name": "Icon", "cost": 500, "description": "Icon"}, 2: {"name": "Flair", "cost": 1000, "description": "Flair"}, 3: {"name": "Custom Photo", "cost": 2500, "description": "Custom Photo"}, 4: {"name": "DM Chat Pass", "cost": 7500, "description": "DM Chat Pass"}, 5: {"name": "VC/Cam Pass", "cost": 20000, "description": "VC/Cam Pass"}}
+
+
 # --- INTENTS SETUP (CRITICAL!) ---
 # Declare all necessary intents, especially the privileged ones
 intents = discord.Intents.default()
@@ -15,7 +32,6 @@ intents.message_content = True
 # Pass the explicit intents to the Bot constructor
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-Month!")
 
 # --- GLOBAL COMMAND ERROR HANDLER ---
 @bot.event
@@ -50,21 +66,6 @@ async def on_command_error(ctx, error):
     print(f"Ignoring exception in command {ctx.command}:")
     raise error
 
-# --- CONFIGURATION CONSTANTS ---
-DATABASE_FILE = "vibe_data.json"
-COOLDOWN_SECONDS = 15
-MAX_VIBE_FOR_PRESTIGE = 2000
-DAILY_VIBE_BASE = 50
-DAILY_VIBE_STREAK_BONUS = 5
-VIBE_PER_MESSAGE = (1, 3) 
-WELCOME_CHANNEL_ID = 1420121916404007136 # REPLACE ME
-MOD_ALERTS_CHANNEL_ID = 1420127688248660081 # REPLACE ME
-SELF_PROMO_CHANNEL_NAME = "self-promo"
-FILTERED_KEYWORDS = ["illegal content", "graphic violence", "shock video", "dtxduo impersonation", "official admin", "mod giveaway"]
-SPAM_LINKS = ["bit.ly", "tinyurl", "ow.ly", "shorte.st"]
-PROMOTION_KEYWORDS = ["subscribe", "patreon", "youtube", "twitch", "onlyfans", "my channel", "check out my"]
-VIBE_RANKS = {"New Neighbor": 0, "Familiar Face": 100, "Resident": 250, "Housemate": 500, "Block Captain": MAX_VIBE_FOR_PRESTIGE}
-VIBE_SHOP_ITEMS = {1: {"name": "Icon", "cost": 500, "description": "Icon"}, 2: {"name": "Flair", "cost": 1000, "description": "Flair"}, 3: {"name": "Custom Photo", "cost": 2500, "description": "Custom Photo"}, 4: {"name": "DM Chat Pass", "cost": 7500, "description": "DM Chat Pass"}, 5: {"name": "VC/Cam Pass", "cost": 20000, "description": "VC/Cam Pass"}}
 
 # --- DATABASE / CORE HELPERS ---
 def load_data():
@@ -118,12 +119,7 @@ async def log_mod_action(guild, action_type, target_user, reason, vibe_change=No
         if vibe_change is not None: embed.add_field(name="Vibe Adjustment", value=f"{vibe_change}", inline=True)
         await mod_channel.send(embed=embed)
 
-# --- BOT SETUP ---
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
+# --- BOT EVENTS ---
 @bot.event
 async def on_ready():
     print(f'Bot is ready. Logged in as {bot.user}')
@@ -177,6 +173,13 @@ async def on_message(message):
         
         await check_and_update_rank(message.author, user_data, old_vibe)
         save_data(vibe_data)
+    
+    # Process commands here *after* all event logic if the message wasn't consumed
+    # NOTE: You already have `await bot.process_commands(message)` above, 
+    # but placing it at the very end is the standard convention if you don't 
+    # check for prefix at the top. Since you do, the structure is fine. 
+    # No action needed here.
+
 
 # --- VIBE ECONOMY COMMANDS ---
 @bot.command()
@@ -308,4 +311,5 @@ async def report(ctx, member: discord.Member, *, reason: str):
 
 @bot.command()
 async def nom_vote(ctx, member: discord.Member):
-    await ctx.send(f"✅ You voted for **{member.display_name}** for Neighbor of the 
+    # This command was incomplete in the original file, now fixed to send a simple message
+    await ctx.send(f"✅ You voted for **{member.display_name}** for Neighbor of the Month!")
