@@ -1,393 +1,399 @@
 import os
 import json
-import time
-from flask import Blueprint, render_template_string, request
-from flask_httpauth import HTTPBasicAuth
 from datetime import datetime, timedelta
+import time
+from functools import wraps
+from flask import Blueprint, request, render_template_string, jsonify
+from flask_httpauth import HTTPBasicAuth
+from werkzeug.security import generate_password_hash, check_password_hash
+import discord
+from .bot_logic import MOD_LOGS_FILE, METRICS_FILE, bot, BOT_START_TIME, get_active_chatters, get_discord_invite_link
 
-# FIX: Changed from relative import (from .bot_logic) to absolute import (from bot_logic)
-# This resolves the "no known parent package" error in Gunicorn deployments.
-from bot_logic import MOD_LOGS_FILE, METRICS_FILE, bot, BOT_START_TIME, ACTIVE_CHATTERS 
-
-# --- FLASK BLUEPRINT & AUTHENTICATION SETUP ---
-
+# --- CONFIGURATION ---
 admin_bp = Blueprint('admin', __name__)
 auth = HTTPBasicAuth()
 
-# Credentials sourced from environment variables for security
-ADMIN_USER = os.getenv('ADMIN_USER')
-ADMIN_PASS = os.getenv('ADMIN_PASS')
+# Fetch credentials from environment variables (MANDATORY for security)
+ADMIN_USER = os.environ.get('ADMIN_USER')
+ADMIN_PASS_HASHED = generate_password_hash(os.environ.get('ADMIN_PASS')) if os.environ.get('ADMIN_PASS') else None
 
-# --- DATA ACCESS & PROCESSING HELPERS ---
-
-def load_json(filepath):
-    """Safely loads JSON data from a file on disk."""
-    if not os.path.exists(filepath):
-        return {}
-    try:
-        with open(filepath, 'r') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return {}
-    
-def get_bot_commands_doc():
-    """Dynamically builds a list of staff commands for documentation."""
-    commands_list = []
-    # Loop through the bot's command list (from the bot_logic import)
-    for command in bot.commands:
-        # Filter for commands with help text and the moderator check
-        if command.help and any(check.__name__ == 'is_moderator' for check in command.checks):
-            commands_list.append({
-                'name': command.name,
-                'usage': f"!{command.name} {command.signature or ''}",
-                'description': command.help.replace('[STAFF]', '').replace('[ADMIN]', '').strip()
-            })
-    return commands_list
-
-
-def calculate_metrics(metrics_data):
-    """Processes raw server_metrics data into actionable insights (Phase 3 & 4)."""
-    
-    # 1. Churn and Retention Calculation (Last 7 Days)
-    today = datetime.now().date()
-    
-    # Safely convert keys to datetime.date objects for comparison
-    join_log = {}
-    for k, v in metrics_data.get('join_log', {}).items():
-        try:
-            join_log[datetime.fromisoformat(k).date()] = v
-        except ValueError:
-            continue # Skip badly formatted keys
-            
-    leave_log = {}
-    for k, v in metrics_data.get('leave_log', {}).items():
-        try:
-            leave_log[datetime.fromisoformat(k).date()] = v
-        except ValueError:
-            continue # Skip badly formatted keys
-    
-    recent_joins = 0
-    recent_leaves = 0
-    
-    # Aggregate data for the last 7 days
-    for i in range(7):
-        date = today - timedelta(days=i)
-        recent_joins += join_log.get(date, 0)
-        recent_leaves += leave_log.get(date, 0)
-        
-    net_change = recent_joins - recent_leaves
-    
-    if recent_joins > 0:
-        churn_rate = (recent_leaves / recent_joins) * 100
-        retention_rate = 100 - churn_rate
-    else:
-        churn_rate = 0
-        retention_rate = 0 
-        
-    # 2. Channel Activity (Top 5)
-    raw_activity = metrics_data.get('channel_activity_log', {})
-    
-    # Sort channel activity by message count (value)
-    sorted_activity = sorted(
-        [(int(cid), count) for cid, count in raw_activity.items()],
-        key=lambda item: item[1],
-        reverse=True
-    )
-    
-    top_channels = []
-    total_messages = sum(count for cid, count in sorted_activity)
-    
-    for channel_id, count in sorted_activity[:5]:
-        channel = bot.get_channel(channel_id)
-        # Use a fallback name if the bot cannot resolve the channel ID (e.g., if it was deleted)
-        name = f"#{channel.name}" if channel else f"#{channel_id}"
-        percentage = (count / total_messages) * 100 if total_messages > 0 else 0
-        
-        top_channels.append({
-            'name': name,
-            'count': count,
-            'percent': f"{percentage:.1f}%"
-        })
-
-    # 3. Monthly Summary (Moderation Actions)
-    summary = metrics_data.get('monthly_summary', {})
-
-    return {
-        'retention_rate': f"{retention_rate:.1f}%",
-        'net_change': net_change,
-        'recent_joins': recent_joins,
-        'monthly_bans': summary.get('total_bans', 0),
-        'monthly_mutes': summary.get('total_mutes', 0),
-        'monthly_kicks': summary.get('total_kicks', 0),
-        'top_channels': top_channels
-    }
-
-# --- AUTHENTICATION LOGIC ---
+# --- AUTHENTICATION ---
 
 @auth.verify_password
 def verify_password(username, password):
-    """Verifies the username and password against the environment variables."""
-    if not ADMIN_USER or not ADMIN_PASS:
-        # Fails closed if credentials aren't set
-        print("SECURITY ALERT: ADMIN_USER or ADMIN_PASS environment variables are not set. Access denied.")
-        return False
-        
-    return username == ADMIN_USER and password == ADMIN_PASS
+    """Verifies the username and password against environment variables."""
+    if ADMIN_USER and ADMIN_PASS_HASHED:
+        if username == ADMIN_USER and check_password_hash(ADMIN_PASS_HASHED, password):
+            return username
+    return None
 
-# --- DASHBOARD ROUTES ---
+# --- UTILITY FUNCTIONS ---
+
+def load_data(filepath, default_data):
+    """Safely loads data from a JSON file."""
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading {filepath}: {e}")
+    return default_data
+
+def calculate_kpis(metrics):
+    """Calculates key performance indicators (KPIs) from the server metrics."""
+    # Ensure all required keys exist, providing 0 or empty list as fallback
+    members_joined = metrics.get('members_joined', [])
+    members_left = metrics.get('members_left', [])
+    messages_by_channel = metrics.get('messages_by_channel', {})
+
+    # 1. Net Member Change (Last 30 Days)
+    now = datetime.now()
+    cutoff_date = now - timedelta(days=30)
+    
+    joined_30d = sum(1 for timestamp in members_joined if datetime.fromisoformat(timestamp) > cutoff_date)
+    left_30d = sum(1 for timestamp in members_left if datetime.fromisoformat(timestamp) > cutoff_date)
+    
+    net_change = joined_30d - left_30d
+
+    # 2. Churn Rate (7-Day)
+    cutoff_date_7d = now - timedelta(days=7)
+    joined_7d = sum(1 for timestamp in members_joined if datetime.fromisoformat(timestamp) > cutoff_date_7d)
+    left_7d = sum(1 for timestamp in members_left if datetime.fromisoformat(timestamp) > cutoff_date_7d)
+    
+    churn_rate = (left_7d / joined_7d * 100) if joined_7d > 0 else 0.0
+
+    # 3. Top 5 Active Channels
+    channel_list = []
+    for channel_id, count in messages_by_channel.items():
+        # Attempt to get channel name (requires bot to be ready)
+        channel_name = f"ID:{channel_id}"
+        if bot.is_ready() and bot.get_channel(int(channel_id)):
+            channel_name = bot.get_channel(int(channel_id)).name
+        
+        channel_list.append({'name': channel_name, 'count': count})
+    
+    top_channels = sorted(channel_list, key=lambda x: x['count'], reverse=True)[:5]
+
+
+    return {
+        'net_change': net_change,
+        'joined_30d': joined_30d,
+        'left_30d': left_30d,
+        'churn_rate_7d': f"{churn_rate:.1f}%",
+        'top_channels': top_channels
+    }
+
+def format_timedelta(seconds):
+    """Formats seconds into human-readable Uptime string."""
+    seconds = int(seconds)
+    days = seconds // (24 * 3600)
+    seconds %= (24 * 3600)
+    hours = seconds // 3600
+    seconds %= 3600
+    minutes = seconds // 60
+    seconds %= 60
+    
+    parts = []
+    if days > 0: parts.append(f"{days}d")
+    if hours > 0: parts.append(f"{hours}h")
+    if minutes > 0: parts.append(f"{minutes}m")
+    parts.append(f"{seconds}s")
+    
+    return " ".join(parts)
+
+# --- ROUTES ---
 
 @admin_bp.route('/', methods=['GET', 'POST'])
-@auth.login_required # This decorator forces Basic Authentication
-def admin_home():
-    """
-    The main admin dashboard page, displaying health and core metrics.
-    """
+@auth.login_required
+def dashboard():
+    """Main administrative dashboard view."""
     
     # 1. Load Data
-    mod_logs_data = load_json(MOD_LOGS_FILE)
-    metrics_data = load_json(METRICS_FILE)
+    mod_logs = load_data(MOD_LOGS_FILE, {'logs': []})
+    server_metrics = load_data(METRICS_FILE, {})
     
-    # 2. Process Metrics
-    processed_metrics = calculate_metrics(metrics_data)
-    total_logs = len(mod_logs_data.get('logs', []))
-
-    # 3. Uptime/Health Data
-    uptime_seconds = int(time.time() - BOT_START_TIME)
-    uptime_display = str(timedelta(seconds=uptime_seconds)).split('.')[0] 
-    latency_ms = round(bot.latency * 1000) if bot.is_ready() else "N/A"
+    # 2. Bot Health Checks
+    uptime_seconds = time.time() - BOT_START_TIME
+    uptime_str = format_timedelta(uptime_seconds)
+    bot_ready = bot.is_ready()
     
-    # 4. Search Functionality
+    # 3. Process Moderation Search (POST request)
     search_results = None
-    search_id = request.form.get('target_id')
-    
-    if request.method == 'POST' and search_id:
-        user_logs = [log for log in mod_logs_data.get('logs', []) if log.get('target_id') == search_id]
-        search_results = user_logs
-        
-    # 5. Log Summary (Last 10 actions)
-    log_summary = mod_logs_data.get('logs', [])[:10]
-    
-    # 6. Command Documentation
-    command_docs = get_bot_commands_doc()
-    
-    # --- HTML & STYLING ---
-    
-    # Define color mappings for the dashboard tiles
-    status_color = '#2ecc71' if bot.is_ready() and latency_ms != 'N/A' and latency_ms < 500 else '#f1c40f'
-    status_text = 'ONLINE' if status_color == '#2ecc71' else 'DEGRADED / STARTING'
-    
-    # Helper to convert log entries to HTML list items
-    def format_log(log):
-        # Handle cases where the timestamp might be missing sub-second data when loaded from JSON
-        timestamp_clean = log['timestamp'].split('.')[0]
-        try:
-            dt_obj = datetime.fromisoformat(timestamp_clean)
-        except ValueError:
-            dt_obj = datetime.now() # Fallback
-            
-        time_str = dt_obj.strftime('%Y-%m-%d %H:%M')
-        
-        # Use action to determine color/icon
-        action_color = {
-            'BAN': 'bg-red-500', 
-            'KICK': 'bg-orange-500', 
-            'MUTE': 'bg-gray-500',
-            'REPORT': 'bg-blue-500'
-        }.get(log['action'], 'bg-indigo-500')
-        
-        return f"""
-        <li class="p-3 border-b border-gray-100 flex justify-between items-start text-sm">
-            <div>
-                <span class="font-bold {action_color} text-white px-2 py-0.5 rounded-full text-xs">
-                    {log['action']}
-                </span>
-                <span class="text-gray-600 ml-2">ID: {log['target_id']}</span>
-                <p class="text-xs mt-1 text-gray-500 truncate" title="{log['reason']}">Reason: {log['reason']}</p>
-            </div>
-            <div class="text-right text-xs text-gray-400">
-                {time_str}
-            </div>
-        </li>
-        """
+    search_query = None
+    if request.method == 'POST':
+        search_query = request.form.get('user_id_search', '').strip()
+        if search_query:
+            # Simple case-insensitive search on target_username or target_id
+            search_results = [
+                log for log in mod_logs.get('logs', []) 
+                if search_query.lower() in log.get('target_username', '').lower() 
+                or search_query == str(log.get('target_id'))
+            ]
 
+    # 4. Calculate KPIs
+    kpis = calculate_kpis(server_metrics)
+
+    # 5. Get Live Data
+    active_chatters = get_active_chatters()
     
-    html_content = f"""
+    # 6. Prepare Template Data
+    
+    # Simple list of log entries for display (last 10)
+    recent_logs = mod_logs.get('logs', [])[-10:][::-1] # Last 10, reversed
+
+    # --- HTML Template ---
+    
+    # Cohesive styling variables matching main website (Red Primary Only)
+    CSS_VARS = """
+    :root {
+        --bg-color: #121212;
+        --card-bg: #1f1f1f;
+        --text-color: #e0e0e0;
+        --primary-action: #ef4444; /* Vivid Red for primary actions/titles */
+        --danger-color: #ef4444; 
+        --border-color: #374151;
+    }
+    body {
+        font-family: 'Inter', sans-serif;
+        background-color: var(--bg-color);
+        color: var(--text-color);
+    }
+    .card {
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color);
+    }
+    .text-gnd-red { color: var(--danger-color); }
+    .bg-gnd-red { background-color: var(--danger-color); }
+    .btn-primary {
+        background-color: var(--primary-action);
+        color: #ffffff;
+        transition: background-color 0.15s;
+    }
+    .btn-primary:hover {
+        background-color: #dc2626; /* Slightly darker red on hover */
+    }
+
+    /* Scrolling Marquee CSS */
+    .marquee-container-header {
+        overflow: hidden;
+        white-space: nowrap;
+        width: 100%;
+        margin-bottom: 0.5rem;
+        padding-bottom: 0.25rem;
+    }
+    .marquee-text-header {
+        display: inline-block;
+        padding-left: 100%;
+        animation: marquee 20s linear infinite;
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #374151;
+    }
+    @keyframes marquee {
+        0%   { transform: translate(0, 0); }
+        100% { transform: translate(-100%, 0); }
+    }
+    """
+
+    # Format recent logs for HTML table
+    log_rows = ""
+    for log in recent_logs:
+        log_rows += f"""
+        <tr class="border-b border-gray-700 hover:bg-gray-700/50">
+            <td class="px-4 py-2 text-xs text-gray-400">{log.get('timestamp', 'N/A').split('.')[0].replace('T', ' ')}</td>
+            <td class="px-4 py-2 font-medium">
+                <span class="px-2 py-0.5 rounded-full text-xs font-semibold {'bg-red-800 text-red-300' if log.get('action') in ['BAN', 'KICK'] else 'bg-gray-700 text-gray-300'}">
+                    {log.get('action', 'N/A')}
+                </span>
+            </td>
+            <td class="px-4 py-2 font-mono text-xs">{log.get('target_username', 'N/A')} ({log.get('target_id', 'N/A')})</td>
+            <td class="px-4 py-2 text-sm text-gray-400 max-w-xs truncate">{log.get('reason', 'No reason provided')}</td>
+        </tr>
+        """
+        
+    # Format search results
+    search_rows = ""
+    if search_results is not None:
+        if search_results:
+            for log in search_results:
+                search_rows += f"""
+                <tr class="border-b border-gray-700 hover:bg-gray-700/50">
+                    <td class="px-4 py-3 text-xs text-gray-400">{log.get('timestamp', 'N/A').split('.')[0].replace('T', ' ')}</td>
+                    <td class="px-4 py-3 font-medium">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-semibold {'bg-red-800 text-red-300' if log.get('action') in ['BAN', 'KICK'] else 'bg-gray-700 text-gray-300'}">
+                            {log.get('action', 'N/A')}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 font-mono text-xs">{log.get('moderator', 'System')}</td>
+                    <td class="px-4 py-3 text-sm text-gray-400">{log.get('reason', 'No reason provided')}</td>
+                </tr>
+                """
+        else:
+            search_rows = f"""
+            <tr><td colspan="4" class="py-4 text-center text-gray-400">No disciplinary records found for '{search_query}'.</td></tr>
+            """
+
+
+    html_template = f"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>GND Manager Admin Dashboard</title>
+        <title>GND Manager Admin Portal</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
-            body {{ font-family: 'Inter', sans-serif; background: #f8fafc; }}
-            .sidebar {{ background: #ffffff; border-right: 1px solid #e2e8f0; }}
-            .metric-value {{ font-size: 2.25rem; font-weight: 700; }}
-            .metric-label {{ text-transform: uppercase; font-size: 0.75rem; color: #64748b; }}
-            .search-input {{ transition: border-color 0.2s; }}
-            .search-input:focus {{ border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5); }}
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
+            {CSS_VARS}
         </style>
     </head>
-    <body class="min-h-screen">
-        <div class="bg-gray-900 text-white shadow-lg p-4 sticky top-0 z-10">
-            <h1 class="text-2xl font-bold tracking-tight">
-                <span class="text-red-500">🛡️</span> GND Manager Command Center
-            </h1>
-        </div>
-        
-        <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 grid lg:grid-cols-4 gap-8">
+    <body class="p-4 md:p-8">
+        <div class="max-w-7xl mx-auto space-y-8">
             
-            <!-- Left Column: Metrics and Health (lg:col-span-1) -->
-            <div class="lg:col-span-1 space-y-8">
-                
-                <!-- Bot Health Card -->
-                <div class="bg-white p-6 rounded-xl shadow-md border-t-4" style="border-top-color: {status_color};">
-                    <h2 class="text-xl font-semibold mb-4 text-gray-800 flex justify-between items-center">
-                        Bot Health
-                        <span class="text-xs font-medium px-3 py-1 rounded-full text-white" style="background-color: {status_color};">
-                            {status_text}
+            <!-- Scrolling Marquee Header (Cohesive Branding) -->
+            <div class="marquee-container-header">
+                <div class="marquee-text-header">ADMIN DASHBOARD | GND MANAGER | PERMANENT RECORD |</div>
+            </div>
+
+            <header class="flex flex-col md:flex-row justify-between items-center pb-4 border-b border-gnd-red">
+                <h1 class="text-3xl font-extrabold text-gnd-red">
+                    GND Manager Admin Portal
+                </h1>
+                <p class="text-sm text-gray-400 mt-2 md:mt-0">
+                    Secure Dashboard for GuysNextDoor Community Management.
+                </p>
+            </header>
+            
+            <!-- Health & Quick Metrics Row -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <!-- Status Card -->
+                <div class="card p-5 rounded-lg shadow-lg space-y-2">
+                    <h2 class="text-sm font-semibold text-gray-400">Bot Health</h2>
+                    <p class="text-2xl font-bold">
+                        <span class="{ 'text-green-500' if bot_ready else 'text-gnd-red' }">
+                            { 'ONLINE' if bot_ready else 'OFFLINE' }
                         </span>
-                    </h2>
-                    <div class="space-y-2 text-sm">
-                        <p class="flex justify-between"><strong>Latency:</strong> <span>{latency_ms} ms</span></p>
-                        <p class="flex justify-between"><strong>Uptime:</strong> <span>{uptime_display}</span></p>
-                        <p class="flex justify-between"><strong>Total Logs:</strong> <span>{total_logs}</span></p>
-                    </div>
+                    </p>
+                    <p class="text-xs text-gray-500">Uptime: {uptime_str}</p>
                 </div>
 
-                <!-- Moderation Metrics -->
-                <div class="bg-white p-6 rounded-xl shadow-md">
-                    <h2 class="text-xl font-semibold mb-4 text-gray-800">Monthly Moderation</h2>
-                    <div class="space-y-3">
-                        <div class="flex justify-between items-center p-2 rounded-lg bg-red-50 border border-red-200">
-                            <span class="text-red-600 font-medium">Bans Issued</span>
-                            <span class="metric-value text-red-700 text-lg">{processed_metrics['monthly_bans']}</span>
-                        </div>
-                        <div class="flex justify-between items-center p-2 rounded-lg bg-orange-50 border border-orange-200">
-                            <span class="text-orange-600 font-medium">Kicks Issued</span>
-                            <span class="metric-value text-orange-700 text-lg">{processed_metrics['monthly_kicks']}</span>
-                        </div>
-                        <div class="flex justify-between items-center p-2 rounded-lg bg-gray-50 border border-gray-200">
-                            <span class="text-gray-600 font-medium">Mutes Issued</span>
-                            <span class="metric-value text-gray-700 text-lg">{processed_metrics['monthly_mutes']}</span>
-                        </div>
-                    </div>
+                <!-- Net Member Change -->
+                <div class="card p-5 rounded-lg shadow-lg space-y-2">
+                    <h2 class="text-sm font-semibold text-gray-400">Net Member Change (30D)</h2>
+                    <p class="text-2xl font-bold { 'text-green-500' if kpis['net_change'] >= 0 else 'text-gnd-red' }">
+                        { '+' if kpis['net_change'] >= 0 else '' }{kpis['net_change']}
+                    </p>
+                    <p class="text-xs text-gray-500">Joined: {kpis['joined_30d']} / Left: {kpis['left_30d']}</p>
                 </div>
 
-                <!-- Command Documentation -->
-                <div class="bg-white p-6 rounded-xl shadow-md">
-                    <h2 class="text-xl font-semibold mb-4 text-gray-800">Bot Command Reference</h2>
-                    <div class="space-y-3">
-                        {
-                            ''.join([
-                                f"""
-                                <div class="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                                    <code class="font-mono text-blue-700 text-sm block">!{cmd['usage']}</code>
-                                    <small class="text-gray-600 text-xs block mt-1">{cmd['description']}</small>
-                                </div>
-                                """
-                                for cmd in command_docs
-                            ])
-                        }
-                    </div>
+                <!-- Churn Rate -->
+                <div class="card p-5 rounded-lg shadow-lg space-y-2">
+                    <h2 class="text-sm font-semibold text-gray-400">7-Day Churn Rate</h2>
+                    <p class="text-2xl font-bold text-gnd-red">
+                        {kpis['churn_rate_7d']}
+                    </p>
+                    <p class="text-xs text-gray-500">Target: < 5%</p>
+                </div>
+                
+                <!-- Active Chatters -->
+                <div class="card p-5 rounded-lg shadow-lg space-y-2">
+                    <h2 class="text-sm font-semibold text-gray-400">Current Active Chatters</h2>
+                    <p class="text-2xl font-bold text-gnd-red">
+                        {len(active_chatters)}
+                    </p>
+                    <p class="text-xs text-gray-500">In the last 5 minutes.</p>
                 </div>
             </div>
-            
-            <!-- Right Column: Analytics and Logs (lg:col-span-3) -->
-            <div class="lg:col-span-3 space-y-8">
-                
-                <!-- Retention & Activity Overview -->
-                <div class="grid md:grid-cols-3 gap-6">
-                    
-                    <!-- Metric Card 1: Retention -->
-                    <div class="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500">
-                        <p class="metric-label">7-Day Retention Rate</p>
-                        <p class="metric-value text-green-600">{processed_metrics['retention_rate']}</p>
-                        <p class="text-sm text-gray-500">({processed_metrics['recent_joins']} joins vs {processed_metrics['recent_joins'] - processed_metrics['net_change']} leaves)</p>
-                    </div>
 
-                    <!-- Metric Card 2: Net Change -->
-                    <div class="bg-white p-6 rounded-xl shadow-md border-l-4 border-indigo-500">
-                        <p class="metric-label">Net Member Change (7D)</p>
-                        <p class="metric-value { 'text-green-600' if processed_metrics['net_change'] >= 0 else 'text-red-600' }">
-                            {'+' if processed_metrics['net_change'] >= 0 else ''}{processed_metrics['net_change']}
-                        </p>
-                        <p class="text-sm text-gray-500">Measure of community health.</p>
-                    </div>
-
-                    <!-- Metric Card 3: Active Chatters -->
-                    <div class="bg-white p-6 rounded-xl shadow-md border-l-4 border-yellow-500">
-                        <p class="metric-label">Unique Active Chatters (In-Memory)</p>
-                        <p class="metric-value text-yellow-600">{len(ACTIVE_CHATTERS)}</p>
-                        <p class="text-sm text-gray-500">Users who have sent a message since bot restart.</p>
-                    </div>
-                </div>
-                
-                <!-- Channel Activity and Log Search Container -->
-                <div class="grid md:grid-cols-2 gap-6">
-                    
-                    <!-- Channel Activity -->
-                    <div class="bg-white p-6 rounded-xl shadow-md">
-                        <h2 class="text-xl font-semibold mb-4 text-gray-800">Top 5 Channel Activity</h2>
-                        <ul class="divide-y divide-gray-100">
-                            {
-                                ''.join([
-                                    f"""
-                                    <li class="flex justify-between items-center py-3">
-                                        <span class="text-gray-700 font-medium">{i+1}. {channel['name']}</span>
-                                        <div class="text-right">
-                                            <span class="text-blue-600 font-bold">{channel['percent']}</span>
-                                            <span class="text-gray-400 text-sm">({channel['count']} msgs)</span>
-                                        </div>
-                                    </li>
-                                    """
-                                    for i, channel in enumerate(processed_metrics['top_channels'])
-                                ]) if processed_metrics['top_channels'] else '<li class="text-gray-500 py-3">No activity logged yet.</li>'
-                            }
-                        </ul>
-                    </div>
-
-                    <!-- Log Search -->
-                    <div class="bg-white p-6 rounded-xl shadow-md">
-                        <h2 class="text-xl font-semibold mb-4 text-gray-800">Moderation Record Search</h2>
-                        <form method="POST">
-                            <input type="text" name="target_id" placeholder="Enter Discord User ID" required
-                                class="search-input w-full p-3 mb-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            >
-                            <button type="submit" 
-                                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg transition duration-150">
-                                Search Permanent Record
-                            </button>
-                        </form>
-                    </div>
-                </div>
-
-                <!-- Search Results / Full Log List -->
-                <div class="bg-white rounded-xl shadow-md overflow-hidden">
-                    <h2 class="text-xl font-semibold p-6 text-gray-800 border-b">
-                        {
-                            f"Search Results for ID: {search_id} ({len(search_results)} Total Logs)" 
-                            if search_results is not None else "Recent Moderation Log Summary (Last 10)"
-                        }
-                    </h2>
-                    <ul class="divide-y divide-gray-200">
-                        {
-                            # Display search results if available, otherwise display the summary
-                            ''.join(format_log(log) for log in (search_results if search_results is not None else log_summary))
-                        }
-                        {
-                            f'<li class="p-4 text-center text-gray-500">No logs found for ID: {search_id}.</li>'
-                            if search_results == [] else ''
-                        }
+            <!-- Top Channels & Moderation Log -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Top 5 Active Channels -->
+                <div class="card p-6 rounded-lg shadow-lg lg:col-span-1">
+                    <h2 class="text-xl font-bold mb-4 border-b pb-2 border-gray-700 text-white">Top 5 Active Channels</h2>
+                    <ul class="space-y-3">
+                        {''.join(f"""
+                        <li class="flex justify-between items-center text-sm">
+                            <span class="text-gray-300 font-medium">#{channel['name']}</span>
+                            <span class="text-white bg-gnd-red px-2 py-0.5 rounded-full text-xs">
+                                {channel['count']}
+                            </span>
+                        </li>
+                        """ for channel in kpis['top_channels'])}
+                        {'' if kpis['top_channels'] else '<li class="text-gray-500 text-sm">No message data available yet.</li>'}
                     </ul>
                 </div>
                 
+                <!-- Recent Moderation Log -->
+                <div class="card p-6 rounded-lg shadow-lg lg:col-span-2">
+                    <h2 class="text-xl font-bold mb-4 border-b pb-2 border-gray-700 text-gnd-red">Recent Permanent Record Entries (Last 10)</h2>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-700">
+                            <thead>
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Target User</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-800">
+                                {log_rows if recent_logs else '<tr><td colspan="4" class="py-4 text-center text-gray-400">No recent entries in the permanent record.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
-            
+
+            <!-- User Lookup Tool (Permanent Record Search) -->
+            <div class="card p-6 rounded-lg shadow-lg space-y-4">
+                <h2 class="text-xl font-bold border-b pb-2 border-gray-700 text-gnd-red">Background Check: User Lookup</h2>
+                <form method="POST" action="{request.path}" class="flex flex-col sm:flex-row gap-4">
+                    <input type="text" name="user_id_search" placeholder="Enter User ID or Username (e.g., 12345... or JohnDoe)" 
+                           value="{search_query if search_query else ''}"
+                           class="flex-grow p-3 rounded-lg bg-gray-700 border border-gray-600 focus:ring-gnd-red focus:border-gnd-red text-white placeholder-gray-400" required>
+                    <button type="submit" class="btn-primary px-6 py-3 rounded-lg font-bold text-sm shadow-md">
+                        Search Permanent Record
+                    </button>
+                </form>
+
+                <!-- Search Results Display -->
+                {f"""
+                <div class="mt-6">
+                    <h3 class="text-lg font-semibold mb-3 text-white">Search Results for '{search_query}':</h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-700">
+                            <thead>
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Moderator</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-800">
+                                {search_rows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                """ if search_results is not None else ''}
+            </div>
+
+            <!-- Footer Link -->
+            <footer class="text-center pt-8 text-gray-500 text-sm">
+                GND Manager v1.0 | Dashboard Access secured by HTTP Basic Authentication.
+            </footer>
+
         </div>
     </body>
     </html>
     """
     
-    return render_template_string(html_content)
+    return render_template_string(html_template)
+
+@admin_bp.route('/data/metrics')
+@auth.login_required
+def metrics_api():
+    """API endpoint to get the latest metrics data (for future API calls)."""
+    metrics = load_data(METRICS_FILE, {})
+    return jsonify(metrics)
