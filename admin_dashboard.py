@@ -5,8 +5,9 @@ from flask import Blueprint, render_template_string, request
 from flask_httpauth import HTTPBasicAuth
 from datetime import datetime, timedelta
 
-# Import necessary components and constants from the bot logic module
-from .bot_logic import MOD_LOGS_FILE, METRICS_FILE, bot, BOT_START_TIME, ACTIVE_CHATTERS 
+# FIX: Changed from relative import (from .bot_logic) to absolute import (from bot_logic)
+# This resolves the "no known parent package" error in Gunicorn deployments.
+from bot_logic import MOD_LOGS_FILE, METRICS_FILE, bot, BOT_START_TIME, ACTIVE_CHATTERS 
 
 # --- FLASK BLUEPRINT & AUTHENTICATION SETUP ---
 
@@ -50,8 +51,20 @@ def calculate_metrics(metrics_data):
     # 1. Churn and Retention Calculation (Last 7 Days)
     today = datetime.now().date()
     
-    join_log = {datetime.fromisoformat(k).date(): v for k, v in metrics_data.get('join_log', {}).items()}
-    leave_log = {datetime.fromisoformat(k).date(): v for k, v in metrics_data.get('leave_log', {}).items()}
+    # Safely convert keys to datetime.date objects for comparison
+    join_log = {}
+    for k, v in metrics_data.get('join_log', {}).items():
+        try:
+            join_log[datetime.fromisoformat(k).date()] = v
+        except ValueError:
+            continue # Skip badly formatted keys
+            
+    leave_log = {}
+    for k, v in metrics_data.get('leave_log', {}).items():
+        try:
+            leave_log[datetime.fromisoformat(k).date()] = v
+        except ValueError:
+            continue # Skip badly formatted keys
     
     recent_joins = 0
     recent_leaves = 0
@@ -165,7 +178,13 @@ def admin_home():
     
     # Helper to convert log entries to HTML list items
     def format_log(log):
-        dt_obj = datetime.fromisoformat(log['timestamp'].split('.')[0])
+        # Handle cases where the timestamp might be missing sub-second data when loaded from JSON
+        timestamp_clean = log['timestamp'].split('.')[0]
+        try:
+            dt_obj = datetime.fromisoformat(timestamp_clean)
+        except ValueError:
+            dt_obj = datetime.now() # Fallback
+            
         time_str = dt_obj.strftime('%Y-%m-%d %H:%M')
         
         # Use action to determine color/icon
