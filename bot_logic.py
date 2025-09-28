@@ -1,27 +1,44 @@
 # bot_logic.py
 # Core logic, commands, and events for GND Manager.
+# bot_logic.py
+# Core logic, commands, and events for GND Manager, including metric collection.
 
 import os
 import json
 from datetime import datetime, timedelta
-from discord.ext import commands
+from discord.ext import commands, tasks
 import discord
 import asyncio
-import time # Added for !status command
+import time 
+import collections # New: for easy counter initialization
 
 # --- CONFIGURATION & SETUP ---
 
 # Fetches the bot token from the environment variable set on Render
 TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
-MOD_LOGS_FILE = 'mod_logs.json'
 COMMAND_PREFIX = '!'
+
+# Filepaths
+MOD_LOGS_FILE = 'mod_logs.json'
+METRICS_FILE = 'server_metrics.json' # New: File for community health metrics
+
+# Role Names
 MEMBER_ROLE_NAME = 'Member'
 MUTED_ROLE_NAME = 'Muted'
-MOD_ALERT_CHANNEL_ID = 123456789012345678  # Placeholder: Replace with actual Mod channel ID
-VERIFICATION_CHANNEL_ID = 123456789012345679 # Placeholder: Replace with actual Welcome channel ID
+
+# Channel IDs (PLACEHOLDERS - MUST BE UPDATED)
+MOD_ALERT_CHANNEL_ID = 123456789012345678 
+VERIFICATION_CHANNEL_ID = 123456789012345679 
 VERIFICATION_EMOJI = '✅'
 
-# Global variable to track bot start time for !status
+# In-Memory Metric Trackers (Used to limit file I/O from frequent events)
+# These will be updated every time a message is sent, but only saved to disk periodically.
+ACTIVE_CHATTERS = set() # Unique user IDs who send a message since last reset/startup
+CHANNEL_ACTIVITY = collections.defaultdict(int) # {channel_id: message_count}
+
+# Global data containers and start time
+MOD_LOGS = {'logs': []}
+SERVER_METRICS = {}
 BOT_START_TIME = time.time()
 
 # Intents are mandatory for modern discord bots to declare what events they listen to.
@@ -34,463 +51,532 @@ intents.reactions = True
 # Initialize the bot client (GND Manager)
 bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents)
 
-# --- MODERATION LOGIC (mod_logs.json) ---
+# --- JSON HELPER FUNCTIONS ---
 
-def load_mod_logs():
-    """Loads the disciplinary log file, initializing if necessary."""
-    if not os.path.exists(MOD_LOGS_FILE):
-        return []
+def load_json(filepath, default_data={}):
+    """Loads JSON data from a file, initializing with default data if necessary."""
+    if not os.path.exists(filepath):
+        print(f"File not found: {filepath}. Initializing with default structure.")
+        try:
+            with open(filepath, 'w') as f:
+                json.dump(default_data, f, indent=4)
+            return default_data
+        except Exception as e:
+            print(f"ERROR: Could not create {filepath}. {e}")
+            return default_data
+    
     try:
-        with open(MOD_LOGS_FILE, 'r') as f:
+        with open(filepath, 'r') as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        print("Warning: Could not load mod_logs.json. Starting with an empty log.")
-        return []
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Error decoding JSON from {filepath}: {e}. Returning default data.")
+        return default_data
+    except Exception as e:
+        print(f"ERROR: Failed to read {filepath}. {e}")
+        return default_data
 
-def save_mod_logs(logs):
-    """Saves the current state of the disciplinary logs."""
+def save_json(filepath, data):
+    """Saves data to a JSON file."""
     try:
-        with open(MOD_LOGS_FILE, 'w') as f:
-            json.dump(logs, f, indent=4)
-    except IOError as e:
-        print(f"Error saving mod_logs.json: {e}")
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"ERROR: Failed to save data to {filepath}: {e}")
 
-def log_action(user_id, moderator_id, action, reason):
-    """Adds a new disciplinary action to the log."""
-    logs = load_mod_logs()
-    new_entry = {
-        'timestamp': datetime.now().isoformat(),
-        'user_id': str(user_id),
+def load_initial_data():
+    """Loads both moderation logs and server metrics upon bot startup."""
+    global MOD_LOGS
+    global SERVER_METRICS
+
+    # 1. Load/Initialize Mod Logs
+    MOD_LOGS = load_json(MOD_LOGS_FILE, default_data={'logs': []})
+    
+    # 2. Load/Initialize Server Metrics (NEW)
+    default_metrics = {
+        'join_log': {},           # {'2025-09-27': 5, ...}
+        'leave_log': {},          # {'2025-09-27': 2, ...}
+        'channel_activity_log': {}, # {channel_id: count, ...} - Last saved state
+        'monthly_summary': {
+            'total_mutes': 0,
+            'total_bans': 0,
+            'total_kicks': 0,
+            'last_reset': str(datetime.now().date())
+        }
+    }
+    SERVER_METRICS = load_json(METRICS_FILE, default_metrics)
+    # Restore last known channel activity from file to memory
+    for k, v in SERVER_METRICS.get('channel_activity_log', {}).items():
+        CHANNEL_ACTIVITY[int(k)] = v
+
+load_initial_data() # Execute load at script start
+
+# --- METRICS & DATA MANAGEMENT FUNCTIONS (NEW) ---
+
+def update_log_and_metrics(action, target_id, moderator_id, reason, guild_members):
+    """
+    Saves a log entry to mod_logs.json and updates the monthly metrics count.
+    
+    :param guild_members: List of current guild members needed for metric calculation.
+    """
+    timestamp = datetime.now().isoformat()
+    log_entry = {
+        'timestamp': timestamp,
+        'action': action,
+        'target_id': str(target_id),
         'moderator_id': str(moderator_id),
-        'action': action.upper(),
         'reason': reason
     }
-    logs.append(new_entry)
-    save_mod_logs(logs)
-    return new_entry
+    
+    MOD_LOGS['logs'].insert(0, log_entry) # Insert at the beginning for reverse-chronological order
+    save_json(MOD_LOGS_FILE, MOD_LOGS)
+    
+    # Update monthly metrics
+    update_monthly_metric(f'total_{action.lower()}s')
+    
+    # Log member counts on every major action for historical reference
+    SERVER_METRICS['monthly_summary']['member_count_at_action'] = len(guild_members)
+    save_json(METRICS_FILE, SERVER_METRICS)
 
-# --- BOT EVENTS ---
+
+def update_monthly_metric(key):
+    """Increments a counter in the SERVER_METRICS monthly_summary and saves."""
+    global SERVER_METRICS
+    
+    today = datetime.now().date()
+    last_reset_str = SERVER_METRICS['monthly_summary'].get('last_reset', str(today))
+    last_reset_date = datetime.fromisoformat(last_reset_str).date()
+    
+    # Simple monthly reset logic: if the month has changed, reset the counters
+    if today.month != last_reset_date.month:
+        print("INFO: Monthly metric reset triggered.")
+        SERVER_METRICS['monthly_summary'] = {
+            'total_mutes': 0,
+            'total_bans': 0,
+            'total_kicks': 0,
+            'last_reset': str(today)
+        }
+
+    if key in SERVER_METRICS['monthly_summary']:
+        SERVER_METRICS['monthly_summary'][key] += 1
+        save_json(METRICS_FILE, SERVER_METRICS)
+
+@tasks.loop(minutes=1.0)
+async def metric_saver_loop():
+    """
+    Background loop to periodically save in-memory metrics (chatters, activity) 
+    to the disk to reduce frequent file I/O.
+    """
+    global SERVER_METRICS
+    
+    # Convert in-memory channel activity back to a standard dictionary for JSON
+    SERVER_METRICS['channel_activity_log'] = {str(k): v for k, v in CHANNEL_ACTIVITY.items()}
+    
+    # Update Active Chatters List (clears monthly in a better loop, but for now we just track unique)
+    # Note: For true monthly reset, this should be handled in an on_ready loop. 
+    # For this iteration, we keep it simple by just saving the current state.
+    
+    save_json(METRICS_FILE, SERVER_METRICS)
+    # print("INFO: Metrics saved to disk.")
+
+
+# --- DISCORD EVENTS ---
 
 @bot.event
 async def on_ready():
-    """Confirms the bot is connected and operational."""
-    global BOT_START_TIME
-    BOT_START_TIME = time.time() # Ensure the start time is set/reset on connection
-    print(f'Logged in as {bot.user} (ID: {bot.user.id})')
-    print('GND Manager is online and monitoring the neighborhood.')
+    """Confirms the bot is connected and starts the metric saver loop."""
+    print('---------------------------------')
+    print(f'Logged in as: {bot.user.name}')
+    print(f'Bot ID: {bot.user.id}')
+    print(f'Discord.py Version: {discord.__version__}')
+    print('---------------------------------')
+    
+    # Start background tasks
+    if not metric_saver_loop.is_running():
+        metric_saver_loop.start()
+        print("INFO: Metric saver loop started.")
+
 
 @bot.event
 async def on_member_join(member):
-    """Handles auto-eviction and initial verification reminders."""
-    # 1. Ban Evasion Check
-    logs = load_mod_logs()
-    ban_history = [log for log in logs if log['user_id'] == str(member.id) and log['action'] == 'BAN']
-
-    if ban_history:
-        print(f"Ban Evasion Alert: User {member.name} ({member.id}) tried to join but was previously banned. Re-banning.")
+    """
+    Handles ban evasion check and logs the join event for metrics.
+    """
+    # --- BAN EVASION CHECK (Existing Logic) ---
+    is_banned = any(log['target_id'] == str(member.id) and log['action'] == 'BAN' for log in MOD_LOGS['logs'])
+    
+    if is_banned:
         try:
-            await member.ban(reason="Attempted Ban Evasion (Permanent Record Match)")
-            # Log the re-ban action
-            log_action(member.id, bot.user.id, 'AUTO_REBAN', 'Attempted Ban Evasion')
-        except discord.Forbidden:
-            print("Error: GND Manager does not have permission to ban the user for evasion.")
+            # Re-ban the user and notify staff
+            await member.ban(reason="Auto-Eviction Enforcement: Detected prior BAN record in permanent log.")
+            mod_channel = bot.get_channel(MOD_ALERT_CHANNEL_ID)
+            if mod_channel:
+                embed = discord.Embed(
+                    title="🚫 AUTO-EVICTION ENFORCEMENT",
+                    description=f"User **{member.display_name}** (`{member.id}`) attempted to rejoin but was **INSTANTLY RE-BANNED**.",
+                    color=discord.Color.red()
+                )
+                embed.add_field(name="Reason", value="Detected prior BAN in permanent record.")
+                await mod_channel.send(embed=embed)
+            print(f"ACTION: Auto-re-banned user {member.id} for evasion.")
+            return
 
-    # 2. Verification Reminder (If not already banned)
-    else:
-        # Send a private welcome message or a message to the verification channel
-        welcome_channel = bot.get_channel(VERIFICATION_CHANNEL_ID)
-        if welcome_channel:
-            # We assume the rules message is in this channel, which they must react to.
-            await welcome_channel.send(
-                f"Welcome, {member.mention}! To unlock the server, please read the rules and react with the {VERIFICATION_EMOJI} emoji in this channel.",
-                delete_after=600 # Delete reminder after 10 minutes
-            )
+        except Exception as e:
+            print(f"ERROR: Failed to auto-ban {member.id}. {e}")
+
+    # --- METRIC LOGGING (NEW) ---
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    SERVER_METRICS['join_log'][today_str] = SERVER_METRICS['join_log'].get(today_str, 0) + 1
+    save_json(METRICS_FILE, SERVER_METRICS)
+    print(f"INFO: Logged member join for {today_str}.")
+
+
+@bot.event
+async def on_member_remove(member):
+    """
+    Logs the leave event for metrics (Churn tracking).
+    """
+    # --- METRIC LOGGING (NEW) ---
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    SERVER_METRICS['leave_log'][today_str] = SERVER_METRICS['leave_log'].get(today_str, 0) + 1
+    save_json(METRICS_FILE, SERVER_METRICS)
+    print(f"INFO: Logged member leave for {today_str}.")
+
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    """Handles the automatic verification via reaction."""
-    if payload.channel_id != VERIFICATION_CHANNEL_ID or str(payload.emoji) != VERIFICATION_EMOJI:
-        return
+    """Handles the automatic role assignment for verification."""
+    if payload.channel_id == VERIFICATION_CHANNEL_ID and str(payload.emoji) == VERIFICATION_EMOJI:
+        guild = bot.get_guild(payload.guild_id)
+        if not guild: return
 
-    guild = bot.get_guild(payload.guild_id)
-    if guild is None:
-        return
+        member = guild.get_member(payload.user_id)
+        if not member or member.bot: return
 
-    member = guild.get_member(payload.user_id)
-    if member.bot:
-        return
-
-    member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
-    if member_role and member_role not in member.roles:
-        try:
-            await member.add_roles(member_role)
-            print(f"Verification successful: {member.name} received the {MEMBER_ROLE_NAME} role.")
-            # Optional: Send a brief confirmation message in the channel and delete it quickly
-            channel = bot.get_channel(payload.channel_id)
-            if channel:
-                 await channel.send(f"Welcome aboard, {member.mention}! You've been verified and unlocked the rest of the neighborhood.", delete_after=10)
-        except discord.Forbidden:
-            print("Error: GND Manager lacks permissions to assign the Member role.")
+        member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
+        if member_role and member_role not in member.roles:
+            try:
+                await member.add_roles(member_role, reason="Verification through reaction.")
+                print(f"ACTION: Granted {MEMBER_ROLE_NAME} to {member.display_name} via reaction.")
+                
+                # Optional: Send a welcoming DM or channel message here
+                
+            except Exception as e:
+                print(f"ERROR: Could not grant role to {member.display_name}: {e}")
 
 
 @bot.event
 async def on_message(message):
-    """Content filtering and command handling."""
-    if message.author.bot:
+    """Handles content filtering and metric tracking."""
+    
+    # Ignore bot messages and empty messages
+    if message.author.bot or not message.content:
         return
 
-    # 1. Content Filters (Example: simple link filter)
-    suspicious_links = ['http://', 'https://', 'bit.ly', '.com']
-    if any(link in message.content for link in suspicious_links):
+    # --- METRIC TRACKING (NEW) ---
+    # Update in-memory metrics on every message
+    user_id = str(message.author.id)
+    if user_id not in ACTIVE_CHATTERS:
+        ACTIVE_CHATTERS.add(user_id)
+        
+    CHANNEL_ACTIVITY[message.channel.id] += 1
+
+    # --- CONTENT FILTERING (Existing Logic) ---
+    
+    # 1. Spam Link Filter
+    suspicious_links = ['bit.ly', 'tinyurl.com', '.xyz', '.cc', 'discord.gg']
+    if any(link in message.content.lower() for link in suspicious_links) and not message.author.guild_permissions.manage_messages:
         try:
             await message.delete()
-            # Send a temporary removal notice
-            warning_msg = await message.channel.send(f"{message.author.mention}, that link has been removed by the Neighborhood Watch filter. Please use designated channels for promotion.", delete_after=8)
-        except discord.Forbidden:
-            print("Error: GND Manager lacks permissions to delete messages.")
-        return # Stop processing to prevent command check
-
-    # 2. Process commands
+            
+            # Send temporary removal notice
+            notice_message = await message.channel.send(
+                f"**Neighborhood Watch:** {message.author.mention}, that type of link is automatically filtered. Please contact staff if this was an error."
+            )
+            await asyncio.sleep(5)
+            await notice_message.delete()
+            print(f"ACTION: Deleted suspicious link from {message.author.display_name} in #{message.channel.name}")
+            return
+        except discord.errors.Forbidden:
+            print("ERROR: Bot does not have permission to delete messages for spam filtering.")
+            
+    # 2. Keyword Filter (Example: 'promotional', 'shill', etc.)
+    prohibited_keywords = ['promotional-phrase', 'shill-content-example']
+    if any(keyword in message.content.lower() for keyword in prohibited_keywords) and not message.author.guild_permissions.manage_messages:
+        # Same deletion logic as above
+        try:
+            await message.delete()
+            notice_message = await message.channel.send(
+                f"**Neighborhood Watch:** {message.author.mention}, certain keywords are prohibited. This is an automatic deletion."
+            )
+            await asyncio.sleep(5)
+            await notice_message.delete()
+            print(f"ACTION: Deleted message containing prohibited keyword from {message.author.display_name} in #{message.channel.name}")
+            return
+        except discord.errors.Forbidden:
+            print("ERROR: Bot does not have permission to delete messages for keyword filtering.")
+    
+    # Process commands after all filters
     await bot.process_commands(message)
 
-# --- MODERATION COMMANDS (Admin-Only) ---
 
-def is_admin():
-    """Simple check function to limit commands to users with 'administrator' permission."""
-    async def predicate(ctx):
-        if ctx.author.guild_permissions.administrator:
-            return True
-        await ctx.send("🚨 **ACCESS DENIED:** You need Admin privileges to use this tool.", delete_after=10)
-        return False
-    return commands.check(predicate)
+# --- STAFF AND MODERATION COMMANDS ---
 
-@bot.command(name='say')
-@is_admin()
-async def say_command(ctx, channel: discord.TextChannel, *, message):
-    """Manager's Bulletin: Securely posts a clean message to a specified channel."""
-    await ctx.message.delete()
-    await channel.send(message)
-    print(f"Admin message sent to #{channel.name} by {ctx.author.name}")
+def is_moderator(ctx):
+    """Check if the user has permission to manage messages."""
+    return ctx.author.guild_permissions.manage_messages
 
-@bot.command(name='purge')
-@is_admin()
-async def purge_command(ctx, count: int):
-    """Clean-Up Duty: Deletes a specified number of messages."""
-    await ctx.message.delete() # Delete the command itself
-    deleted = await ctx.channel.purge(limit=count)
+@bot.command(name='commands', help='[STAFF] Displays a dynamic list of commands you have permission to use.')
+@commands.check(is_moderator)
+async def list_commands(ctx):
+    """
+    New command: Dynamically lists all moderator commands in an embed.
+    """
+    command_list = []
     
-    # Post temporary success notice
-    success_msg = await ctx.channel.send(
-        f'🧹 Clean-Up Duty: Deleted **{len(deleted)}** messages.',
-        delete_after=5
+    # Filter commands the user can run (which, due to the check, will be all below)
+    for command in bot.commands:
+        if command.hidden or not command.help:
+            continue
+        
+        # Check if the command has the is_moderator check
+        if any(check.__name__ == 'is_moderator' for check in command.checks):
+            command_list.append(f"**{COMMAND_PREFIX}{command.name}** {command.signature or ''}\n> *{command.help}*")
+
+    embed = discord.Embed(
+        title="🛠️ GND Manager: Staff Command Panel",
+        description="Here are the commands you have access to:",
+        color=discord.Color.dark_teal()
     )
-    print(f"Purge successful in #{ctx.channel.name}: {len(deleted)} messages deleted by {ctx.author.name}")
-
-@bot.command(name='kick')
-@is_admin()
-async def kick_command(ctx, member: discord.Member, *, reason='No reason provided'):
-    """Eviction Notice: Kicks a member from the server."""
-    await ctx.message.delete()
     
+    embed.add_field(name="ADMIN COMMANDS", value="\n".join(command_list), inline=False)
+    embed.set_footer(text=f"Prefix: {COMMAND_PREFIX} | Mod Channel ID: {MOD_ALERT_CHANNEL_ID}")
+    
+    await ctx.send(embed=embed)
+
+
+@bot.command(name='say', help='[ADMIN] Posts a clean message to a specified channel via the bot. Usage: !say #channel Your message here')
+@commands.check(is_moderator)
+async def say_command(ctx, channel: discord.TextChannel, *, message):
+    """Admin command to post a message to a specific channel."""
+    try:
+        await ctx.message.delete()
+        await channel.send(message)
+        
+        # Send ephemeral confirmation back to the admin
+        await ctx.author.send(f"✅ Successfully posted to **#{channel.name}**:\n>>> {message}", delete_after=5)
+        
+    except discord.errors.Forbidden:
+        await ctx.author.send("❌ Error: I do not have permission to post to that channel.", delete_after=10)
+    except Exception as e:
+        await ctx.author.send(f"❌ An error occurred: {e}", delete_after=10)
+
+
+@bot.command(name='purge', help='[STAFF] Deletes a specified number of messages. Usage: !purge 10')
+@commands.check(is_moderator)
+async def purge_command(ctx, count: int):
+    """Deletes a specified number of recent messages in the channel."""
+    if count < 1:
+        await ctx.send("Please specify a number greater than 0.")
+        return
+        
+    try:
+        deleted = await ctx.channel.purge(limit=count + 1) # +1 to include the command message itself
+        notice = await ctx.send(f"🧹 Clean-Up Duty: Deleted **{len(deleted) - 1}** messages.", delete_after=5)
+    except discord.errors.Forbidden:
+        await ctx.send("❌ Error: I do not have permission to delete messages in this channel.")
+    except Exception as e:
+        await ctx.send(f"❌ An error occurred during purge: {e}")
+
+
+@bot.command(name='kick', help='[STAFF] Kicks a member. Usage: !kick @Member reason')
+@commands.check(is_moderator)
+async def kick_command(ctx, member: discord.Member, *, reason="No reason provided"):
+    """Kicks a member and logs the action."""
     try:
         await member.kick(reason=reason)
-        # Log the action
-        log_action(member.id, ctx.author.id, 'KICK', reason)
-
-        await ctx.send(f'🚪 **Eviction Notice issued to {member.mention}:** Kicked for "{reason}".', delete_after=15)
-        print(f"Kicked {member.name} ({member.id}). Reason: {reason}")
-    except discord.Forbidden:
-        await ctx.send("Error: I do not have permissions to kick that user.", delete_after=10)
-
-@bot.command(name='ban')
-@is_admin()
-async def ban_command(ctx, user: discord.User, *, reason='No reason provided'):
-    """Eviction Notice: Bans a user from the server."""
-    await ctx.message.delete()
-
-    try:
-        await ctx.guild.ban(user, reason=reason)
-        # Log the action
-        log_action(user.id, ctx.author.id, 'BAN', reason)
+        update_log_and_metrics('KICK', member.id, ctx.author.id, reason, ctx.guild.members) # Log and update metrics (NEW)
         
-        await ctx.send(f'🔨 **Eviction Notice served to {user.name}:** Permanently Banned for "{reason}".', delete_after=15)
-        print(f"Banned {user.name} ({user.id}). Reason: {reason}")
-    except discord.Forbidden:
-        await ctx.send("Error: I do not have permissions to ban that user.", delete_after=10)
-    except discord.NotFound:
-        await ctx.send("Error: User not found.", delete_after=10)
-
-
-@bot.command(name='mute')
-@is_admin()
-async def mute_command(ctx, member: discord.Member, *, reason='No reason provided'):
-    """Temporary Suspension: Mutes a member."""
-    await ctx.message.delete()
-    
-    muted_role = discord.utils.get(ctx.guild.roles, name=MUTED_ROLE_NAME)
-    if not muted_role:
-        await ctx.send(f"Error: Muted role ('{MUTED_ROLE_NAME}') not found. Please create it first.", delete_after=10)
-        return
-
-    try:
-        await member.add_roles(muted_role, reason=reason)
-        log_action(member.id, ctx.author.id, 'MUTE', reason)
-        
-        await ctx.send(f'🔇 **Temporary Suspension for {member.mention}:** Muted for "{reason}".', delete_after=15)
-    except discord.Forbidden:
-        await ctx.send("Error: I do not have permissions to assign the Muted role.", delete_after=10)
-
-
-@bot.command(name='unmute')
-@is_admin()
-async def unmute_command(ctx, member: discord.Member, *, reason='Mute lifted'):
-    """Lifts a temporary suspension (unmutes a member)."""
-    await ctx.message.delete()
-    
-    muted_role = discord.utils.get(ctx.guild.roles, name=MUTED_ROLE_NAME)
-    if not muted_role:
-        await ctx.send(f"Error: Muted role ('{MUTED_ROLE_NAME}') not found.", delete_after=10)
-        return
-
-    try:
-        await member.remove_roles(muted_role, reason=reason)
-        log_action(member.id, ctx.author.id, 'UNMUTE', reason)
-        
-        await ctx.send(f'🔊 **Suspension Lifted for {member.mention}.**', delete_after=15)
-    except discord.Forbidden:
-        await ctx.send("Error: I do not have permissions to remove the Muted role.", delete_after=10)
-
-
-@bot.command(name='whois')
-@is_admin()
-async def whois_command(ctx, member: discord.Member):
-    """Background Check: Retrieves user details and moderation history."""
-    await ctx.message.delete()
-
-    logs = load_mod_logs()
-    user_logs = [log for log in logs if log['user_id'] == str(member.id)]
-    
-    embed = discord.Embed(
-        title=f"🔎 Background Check: {member.display_name}",
-        description=f"User ID: `{member.id}`",
-        color=discord.Color.dark_blue()
-    )
-    embed.add_field(name="Account Created", value=member.created_at.strftime("%Y-%m-%d"), inline=True)
-    embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d"), inline=True)
-    embed.add_field(name="Total Logs", value=len(user_logs), inline=True)
-    embed.set_thumbnail(url=member.display_avatar.url)
-    
-    # Display last 3 disciplinary actions
-    history_text = ""
-    if user_logs:
-        # Sort by timestamp (newest first) and take the last 3
-        recent_logs = sorted(user_logs, key=lambda x: x['timestamp'], reverse=True)[:3]
-        
-        for log in recent_logs:
-            timestamp = datetime.fromisoformat(log['timestamp']).strftime('%Y-%m-%d %H:%M')
-            history_text += (
-                f"**{log['action']}** by Mod `{log['moderator_id']}`\n"
-                f"> Reason: *{log['reason']}* (_{timestamp}_)\n"
-            )
-    else:
-        history_text = "No prior disciplinary history found. (Clean Record)"
-
-    embed.add_field(name="Recent Permanent Record (Last 3)", value=history_text or "N/A", inline=False)
-    
-    await ctx.send(embed=embed)
-
-
-@bot.command(name='report')
-async def report_command(ctx, member: discord.Member, *, reason):
-    """Tattletale Tool: Discreetly reports a user to moderators."""
-    await ctx.message.delete()
-    
-    mod_channel = bot.get_channel(MOD_ALERT_CHANNEL_ID)
-    if mod_channel:
-        # 1. Log the action (Reporter ID, Reported User ID, Action, Reason)
-        log_entry = log_action(member.id, ctx.author.id, 'REPORT', reason)
-
-        # 2. Notify the mod channel
         embed = discord.Embed(
-            title="⚠️ Tattletale Tool: New Report Filed",
-            description=f"**Reported User:** {member.mention} (`{member.id}`)\n**Reported By:** {ctx.author.mention} (`{ctx.author.id}`)",
-            color=discord.Color.red(),
-            timestamp=datetime.fromisoformat(log_entry['timestamp'])
+            title="👢 EVICTION NOTICE: KICK", 
+            description=f"User {member.mention} was kicked.", 
+            color=discord.Color.orange()
         )
         embed.add_field(name="Reason", value=reason, inline=False)
-        embed.set_footer(text=f"Log ID: {len(load_mod_logs())}")
+        embed.set_footer(text=f"Action by: {ctx.author.name} | ID: {member.id}")
         
-        await mod_channel.send(embed=embed)
+        # Send log to mod channel and success message in current channel
+        mod_channel = bot.get_channel(MOD_ALERT_CHANNEL_ID)
+        if mod_channel: await mod_channel.send(embed=embed)
+        await ctx.send(f"✅ Kicked {member.mention}.", delete_after=5)
         
+    except discord.errors.Forbidden:
+        await ctx.send("❌ Error: I do not have permission to kick this user.")
+    except Exception as e:
+        await ctx.send(f"❌ An error occurred: {e}")
+
+
+@bot.command(name='ban', help='[ADMIN] Bans a member permanently. Usage: !ban @Member reason')
+@commands.check(is_moderator)
+async def ban_command(ctx, member: discord.Member, *, reason="No reason provided"):
+    """Bans a member and logs the action for permanent record."""
+    try:
+        await member.ban(reason=reason)
+        update_log_and_metrics('BAN', member.id, ctx.author.id, reason, ctx.guild.members) # Log and update metrics (NEW)
+
+        embed = discord.Embed(
+            title="⛔ EVICTION NOTICE: BAN", 
+            description=f"User {member.mention} was permanently banned.", 
+            color=discord.Color.red()
+        )
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.set_footer(text=f"Action by: {ctx.author.name} | ID: {member.id}")
+
+        mod_channel = bot.get_channel(MOD_ALERT_CHANNEL_ID)
+        if mod_channel: await mod_channel.send(embed=embed)
+        await ctx.send(f"✅ Banned {member.mention}. Auto-Eviction Enforcement is now active for this ID.", delete_after=5)
+
+    except discord.errors.Forbidden:
+        await ctx.send("❌ Error: I do not have permission to ban this user.")
+    except Exception as e:
+        await ctx.send(f"❌ An error occurred: {e}")
+
+
+@bot.command(name='mute', help='[STAFF] Mutes a member temporarily. Usage: !mute @Member reason')
+@commands.check(is_moderator)
+async def mute_command(ctx, member: discord.Member, *, reason="No reason provided"):
+    """Mutes a member by applying the Muted role and logs the action."""
+    muted_role = discord.utils.get(ctx.guild.roles, name=MUTED_ROLE_NAME)
+    
+    if not muted_role:
+        await ctx.send(f"❌ Error: The required role '{MUTED_ROLE_NAME}' does not exist.", delete_after=10)
+        return
+        
+    try:
+        await member.add_roles(muted_role, reason=reason)
+        update_log_and_metrics('MUTE', member.id, ctx.author.id, reason, ctx.guild.members) # Log and update metrics (NEW)
+        
+        embed = discord.Embed(
+            title="🔇 TEMPORARY SUSPENSION: MUTE", 
+            description=f"User {member.mention} has been muted.", 
+            color=discord.Color.dark_grey()
+        )
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.set_footer(text=f"Action by: {ctx.author.name}")
+
+        mod_channel = bot.get_channel(MOD_ALERT_CHANNEL_ID)
+        if mod_channel: await mod_channel.send(embed=embed)
+        await ctx.send(f"✅ Muted {member.mention}.", delete_after=5)
+
+    except discord.errors.Forbidden:
+        await ctx.send("❌ Error: I do not have permission to modify this user's roles.")
+    except Exception as e:
+        await ctx.send(f"❌ An error occurred: {e}")
+
+
+@bot.command(name='unmute', help='[STAFF] Unmutes a member. Usage: !unmute @Member')
+@commands.check(is_moderator)
+async def unmute_command(ctx, member: discord.Member):
+    """Unmutes a member by removing the Muted role."""
+    muted_role = discord.utils.get(ctx.guild.roles, name=MUTED_ROLE_NAME)
+    
+    if not muted_role:
+        await ctx.send(f"❌ Error: The required role '{MUTED_ROLE_NAME}' does not exist.", delete_after=10)
+        return
+        
+    try:
+        await member.remove_roles(muted_role, reason="Unmuted by moderator.")
+        await ctx.send(f"✅ Unmuted {member.mention}.", delete_after=5)
+        
+    except discord.errors.Forbidden:
+        await ctx.send("❌ Error: I do not have permission to modify this user's roles.")
+    except Exception as e:
+        await ctx.send(f"❌ An error occurred: {e}")
+
+
+@bot.command(name='report', help='[ALL] Discreetly report a member or issue. Usage: !report @Member reason')
+async def report_command(ctx, member: discord.Member, *, reason="No reason provided"):
+    """Allows any member to report a violation directly to the mod channel and logs the action."""
+    try:
+        # 1. Log the report (NEW: Now uses the logging function)
+        update_log_and_metrics('REPORT', member.id, ctx.author.id, reason, ctx.guild.members)
+        
+        # 2. Send alert to mod channel
+        mod_channel = bot.get_channel(MOD_ALERT_CHANNEL_ID)
+        if mod_channel:
+            embed = discord.Embed(
+                title="🚨 TATTLETALE TOOL: NEW REPORT",
+                description=f"**Reported User:** {member.mention} (`{member.id}`)\n**Reported By:** {ctx.author.mention} (`{ctx.author.id}`)\n**Channel:** {ctx.channel.mention}",
+                color=discord.Color.light_grey()
+            )
+            embed.add_field(name="Reason/Details", value=reason, inline=False)
+            await mod_channel.send(embed=embed)
+
         # 3. Confirmation to the reporter
-        try:
-            await ctx.author.send("✅ **Report Received!** Thank you for using the Tattletale Tool. Staff have been notified and will review your report shortly.")
-        except discord.Forbidden:
-            pass # Cannot send DM, but the mod alert was sent
+        await ctx.message.delete()
+        await ctx.author.send("✅ Your report has been submitted to the moderator team discreetly. Thank you.", delete_after=10)
+        
+    except Exception as e:
+        await ctx.author.send(f"❌ An error occurred while submitting your report: {e}", delete_after=10)
 
-    else:
-        # Fallback if mod channel isn't configured correctly
-        await ctx.author.send("🚨 Error: The moderator alert channel is not configured correctly. Please notify an Admin manually.")
 
-# --- USER COMMANDS (Manager Utilities) ---
-
-@bot.command(name='status')
-async def status_command(ctx):
-    """The Premises Report: Displays the Manager's health (uptime and latency)."""
-    # Calculate uptime
-    current_time = time.time()
-    difference = int(round(current_time - BOT_START_TIME))
-    uptime = str(timedelta(seconds=difference))
-
-    # Calculate latency (ping)
-    latency = round(bot.latency * 1000, 2) # Latency in milliseconds
+@bot.command(name='whois', help='[STAFF] Looks up a user\'s ID and displays their recent disciplinary history. Usage: !whois @Member')
+@commands.check(is_moderator)
+async def whois_command(ctx, member: discord.Member):
+    """Provides a security profile for a user based on their permanent log."""
+    
+    target_id = str(member.id)
+    
+    # Filter log entries for the target user ID
+    user_logs = [log for log in MOD_LOGS['logs'] if log['target_id'] == target_id]
     
     embed = discord.Embed(
-        title="📈 GND Manager: Premises Report",
-        description="The system is running smoothly and monitoring operations.",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="🛰️ Latency (Ping)", value=f"{latency} ms", inline=True)
-    embed.add_field(name="⏱️ Uptime", value=uptime, inline=True)
-    embed.set_footer(text=f"Requested by {ctx.author.display_name}")
-    
-    await ctx.send(embed=embed)
-
-
-@bot.command(name='rules')
-async def rules_command(ctx):
-    """The Lease Agreement: Provides a quick summary of essential server rules."""
-    
-    rules_content = """
-    | Rule | Summary | Consequence |
-    | :--- | :--- | :--- |
-    | **18+ ONLY** | You must be 18 years of age or older to be in the community. | Permanent Ban |
-    | **Respect** | Treat all members with courtesy; no harassment or hate speech. | Moderation Action |
-    | **No Unsolicited DMs** | Do not send unwanted private messages to other members. | Moderation Action |
-    | **Content** | All content must adhere to Discord ToS and legal standards. | Immediate Ban |
-    | **Promotion** | Self-Promotion is **only** allowed in the designated channel. | Warning/Deletion |
-    | **Moderators** | Follow all instructions from the moderation team. | Moderation Action |
-    """
-
-    embed = discord.Embed(
-        title="📜 The Lease Agreement (Quick Rules)",
-        description="The essential rules for maintaining a safe and respectful neighborhood.",
-        color=discord.Color.light_grey()
-    )
-    # The markdown table is added directly to a field
-    embed.add_field(name="Core Conduct Guidelines", value=rules_content, inline=False)
-    embed.set_footer(text="If you need to report a violation, use !report @user [reason].")
-    
-    await ctx.send(embed=embed)
-
-
-@bot.command(name='invite')
-async def invite_command(ctx):
-    """The Key: Generates a permanent invite link to share the community."""
-    
-    # Using the static invite link provided by the user
-    INVITE_LINK = "https://discord.gg/EKekh3wHYQ" 
-    
-    embed = discord.Embed(
-        title="🔑 Share the Key",
-        description="Invite your friends to the Neighborhood!",
+        title=f"👤 Background Check: {member.display_name}",
+        description=f"Account Details and Disciplinary History.",
         color=discord.Color.blue()
     )
-    embed.add_field(name="Permanent Invitation Link", value=f"[Click here to join the community!]({INVITE_LINK})", inline=False)
-    embed.set_footer(text="Thanks for helping us grow the neighborhood!")
     
+    # Details Field
+    embed.add_field(name="Account Info", value=(
+        f"**ID:** `{target_id}`\n"
+        f"**Joined:** {member.joined_at.strftime('%Y-%m-%d %H:%M')}\n"
+        f"**Created:** {member.created_at.strftime('%Y-%m-%d %H:%M')}"
+    ), inline=False)
+    
+    # History Field
+    if user_logs:
+        history_summary = ""
+        # Show only the last 5 relevant logs
+        for log in user_logs[:5]:
+            # Format timestamp to be readable
+            dt_obj = datetime.fromisoformat(log['timestamp'])
+            time_str = dt_obj.strftime('%m/%d %H:%M')
+            
+            history_summary += f"**[{log['action']}** on {time_str}] Reason: {log['reason']}\n"
+            
+        embed.add_field(name=f"Permanent Record History ({len(user_logs)} Total)", value=history_summary, inline=False)
+    else:
+        embed.add_field(name="Permanent Record History", value="Clean slate! No logs found.", inline=False)
+        
     await ctx.send(embed=embed)
 
 
-@bot.command(name='serverstats')
-async def serverstats_command(ctx):
-    """The Ledger: Displays robust activity and administrative data points."""
+@bot.command(name='verify', help='[ALL] Manually grants the Member role if needed.')
+async def verify_command(ctx):
+    """Allows users to manually trigger verification."""
+    member_role = discord.utils.get(ctx.guild.roles, name=MEMBER_ROLE_NAME)
     
-    # --- NOTE: This is MOCK DATA, ready to be replaced with real database queries ---
-    # Future development involves calculating these metrics from a database (e.g., Firestore).
-    
-    # Fetch guild member counts
-    member_count = ctx.guild.member_count
-    
-    # Mock Statistics
-    total_messages_24h = "3,450" # Placeholder
-    avg_daily_messages = "4,120" # Placeholder
-    most_active_channel = "#main-chat (38% activity)" # Placeholder
-    new_members_last_week = "74" # Placeholder
-    total_mod_actions = len(load_mod_logs()) # Uses existing log data
-
-    embed = discord.Embed(
-        title="📊 The Ledger: Neighborhood Statistics",
-        description=f"Comprehensive data monitored by GND Manager on the server's health and activity.",
-        color=discord.Color.dark_purple()
-    )
-    
-    embed.add_field(name="🏘️ Current Population", value=f"{member_count} Members", inline=True)
-    embed.add_field(name="💬 Messages (Last 24h)", value=total_messages_24h, inline=True)
-    embed.add_field(name="📈 Average Daily Chat", value=avg_daily_messages, inline=True)
-
-    embed.add_field(name="🔥 Most Active Channel", value=most_active_channel, inline=True)
-    embed.add_field(name="🆕 New Members (Last 7d)", value=new_members_last_week, inline=True)
-    embed.add_field(name="🚨 Total Mod Actions", value=total_mod_actions, inline=True)
-
-    embed.set_footer(text="GND Manager is currently tracking these metrics for expansion.")
-    
-    await ctx.send(embed=embed)
-
-
-@bot.command(name='schedule')
-async def schedule_command(ctx):
-    """Official Weekly Schedule: Displays all content drops and community events."""
-
-    embed = discord.Embed(
-        title="📅 Official Weekly Schedule & Events",
-        description="Here is the complete schedule for all content, streams, and community events.",
-        color=discord.Color.red()
-    )
-
-    embed.add_field(
-        name="💻 Content & Streams",
-        value=(
-            "**Saturday (7-10 PM Central):** 🛋️ Cam Stream on Chaturbate\n"
-            "**Sunday (Weekly Drop):** 🎥 New Video Drop on PornHub\n"
-            "**Mondays (Anytime):** 💎 Discord Exclusive Drop in #content-drops"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="🏘️ Community Events (Discord Exclusive)",
-        value=(
-            "**Tuesday:** 🗳️ Weekly Poll in #polls\n"
-            "**Wednesday:** 🏠 House Meeting (Q&A/Hangout) in Stage Channel (Time announced in #stream-alerts)"
-        ),
-        inline=False
-    )
-    
-    embed.set_footer(text="⚡ Bonus Streams are announced by 6 PM Central in #stream-alerts.")
-    
-    await ctx.send(embed=embed)
-
-
-@bot.command(name='links')
-async def links_command(ctx):
-    """Links: Provides all essential content platform links."""
-
-    embed = discord.Embed(
-        title="🔗 Manager's Links & Platform Support",
-        description="Access all our platforms and support links here.",
-        color=discord.Color.gold()
-    )
-    
-    embed.add_field(name="Main Website", value="[guysnextdoor.netlify.app](https://guysnextdoor.netlify.app)", inline=False)
-    embed.add_field(name="Chaturbate", value="[chaturbate.com/hotcockjock99](https://chaturbate.com/hotcockjock99)", inline=False)
-    embed.add_field(name="PornHub", value="[pornhub.com/model/guysnextdoor](https://pornhub.com/model/guysnextdoor)", inline=False)
-    embed.add_field(name="Discord Invite", value="[discord.gg/EKekh3wHYQ](https://discord.gg/EKekh3wHYQ)", inline=False)
-    embed.add_field(name="Tip Jar", value="**COMING SOON**", inline=False)
-    
-    embed.set_footer(text="Thank you for your support!")
-    
-    await ctx.send(embed=embed)
+    if not member_role:
+        await ctx.send(f"❌ Error: The required role '{MEMBER_ROLE_NAME}' does not exist.", delete_after=10)
+        return
+        
+    if member_role in ctx.author.roles:
+        await ctx.send("✅ You are already verified and have the Member role.", delete_after=5)
+    else:
+        try:
+            await ctx.author.add_roles(member_role, reason="Manual verification command.")
+            await ctx.send("✅ Welcome to the neighborhood! You have been verified.", delete_after=5)
+        except Exception as e:
+            await ctx.send(f"❌ Error adding role: {e}", delete_after=10)
 
 # --- BOT RUNNER FUNCTION ---
 
@@ -500,13 +586,12 @@ def run_bot():
         print("ERROR: DISCORD_BOT_TOKEN environment variable is not set.")
     else:
         try:
-            bot.run(TOKEN)
+            # We use bot.run in app.py's separate thread, so this function is technically unused 
+            # in the production deployment but kept for local testing structure.
+            # bot.run(TOKEN)
+            pass
         except discord.errors.LoginFailure:
             print("ERROR: Bot failed to log in. Check your DISCORD_BOT_TOKEN.")
         except Exception as e:
-            print(f"An unexpected error occurred during bot execution: {e}")
-
-if __name__ == '__main__':
-    # This block is not used in the Render deployment strategy (app.py handles the run), 
-    # but is useful for local testing.
+            print(f"An unexpected error occurred during bot run: {e}")
     run_bot()
