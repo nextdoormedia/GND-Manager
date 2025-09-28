@@ -28,17 +28,23 @@ discord_thread.daemon = True
 discord_thread.start()
 
 
-# --- FLASK WEB SERVER (Updated Root Landing Page) ---
+# --- FLASK WEB SERVER (Cohesive Root Landing Page) ---
 
 @app.route('/')
 def home():
     """
     The member-facing landing page for the GND Manager system, 
-    updated to reflect the security and utility focus.
+    updated to use the primary Red branding and scrolling marquee.
     """
     
-    # We use a placeholder for the invite link here for deployment safety. 
     DISCORD_INVITE_LINK = "https://discord.gg/EKekh3wHYQ" 
+    
+    # Static link data (these links were taken from your bot_logic.py snippet)
+    GND_LINKS = [
+        {"name": "Main Website", "url": "https://guysnextdoor.netlify.app"},
+        {"name": "Chaturbate", "url": "https://chaturbate.com/hotcockjock99"},
+        {"name": "PornHub", "url": "https://pornhub.com/model/guysnextdoor"},
+    ]
     
     is_online = bot.is_ready()
     status_text = "Operational" if is_online else "Starting Up"
@@ -53,23 +59,68 @@ def home():
         <title>GND Manager - GUYSNEXTDOOR</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
+            
+            /* Match Main Website Colors/Variables - Red Primary Only */
+            :root {{
+                --bg-color: #121212;
+                --card-bg: #1f1f1f;
+                --primary-action: #ef4444; /* Vivid Red for CTAs */
+                --danger-color: #ef4444;
+            }}
+            
             body {{ 
                 font-family: 'Inter', sans-serif; 
-                background: #111827; 
+                background-color: var(--bg-color); 
+            }}
+            
+            /* Cohesive Red Button Styling */
+            .btn-primary {{
+                background-color: var(--primary-action);
+                color: #ffffff;
+            }}
+            .btn-primary:hover {{
+                background-color: #dc2626; /* Slightly darker red on hover */
+            }}
+
+            /* Scrolling Marquee CSS */
+            .marquee-container {{
+                overflow: hidden;
+                white-space: nowrap;
+                width: 100%;
+                margin-bottom: 1rem;
+                border-bottom: 2px solid #2d2d2d;
+                padding-bottom: 0.5rem;
+            }}
+            .marquee-text {{
+                display: inline-block;
+                padding-left: 100%;
+                animation: marquee 20s linear infinite;
+                font-size: 1.5rem;
+                font-weight: 700;
+                color: #374151; /* Subtle Dark gray */
+            }}
+            @keyframes marquee {{
+                0%   {{ transform: translate(0, 0); }}
+                100% {{ transform: translate(-100%, 0); }}
             }}
         </style>
     </head>
     <body class="min-h-screen flex items-center justify-center p-4">
-        <div class="max-w-xl w-full bg-gray-800 text-white p-8 md:p-10 rounded-xl shadow-2xl border-t-8 border-red-600 space-y-8">
+        <div class="max-w-xl w-full bg-[var(--card-bg)] text-white p-8 md:p-10 rounded-xl shadow-2xl border-t-8 border-[var(--danger-color)] space-y-8">
             
+            <!-- Scrolling Marquee Branding -->
+            <div class="marquee-container">
+                <div class="marquee-text">GUYSNEXTDOOR | GUYSNEXTDOOR | GUYSNEXTDOOR |</div>
+            </div>
+
             <!-- Header & Status -->
             <div class="text-center space-y-3">
-                <h1 class="text-4xl font-extrabold text-red-500 tracking-tight">
-                    GUYSNEXTDOOR
+                <h1 class="text-4xl font-extrabold text-[var(--danger-color)] tracking-tight">
+                    GND MANAGER
                 </h1>
                 <p class="text-xl text-gray-300">
-                    The official home of the **GND Manager**, your 24/7 administrative utility.
+                    The official home of your 24/7 administrative utility.
                 </p>
                 <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium {status_color} text-white">
                     <svg class="w-2 h-2 mr-1.5" fill="currentColor" viewBox="0 0 8 8">
@@ -82,7 +133,7 @@ def home():
             <!-- Call to Action -->
             <div class="text-center">
                 <a href="{DISCORD_INVITE_LINK}" target="_blank"
-                   class="inline-block w-full sm:w-auto px-8 py-3 text-lg font-bold rounded-lg transition duration-300 bg-indigo-600 hover:bg-indigo-700 shadow-xl hover:shadow-indigo-500/50">
+                   class="inline-block w-full sm:w-auto px-8 py-3 text-lg font-bold rounded-lg transition duration-300 btn-primary shadow-xl hover:shadow-[var(--primary-action)]/50">
                     Join the Neighborhood Discord 🏠
                 </a>
             </div>
@@ -94,46 +145,34 @@ def home():
                 <h2 class="text-2xl font-semibold text-gray-200">🛡️ Core Administrative Focus</h2>
                 <ul class="space-y-3 text-gray-400">
                     <li class="flex items-start">
-                        <span class="text-red-500 mr-2 mt-0.5">📜</span>
+                        <span class="text-[var(--danger-color)] mr-2 mt-0.5">📜</span>
                         <p><strong>Total Accountability:</strong> All disciplinary actions are logged to the **Permanent Record** for audit and security purposes.</p>
                     </li>
                     <li class="flex items-start">
-                        <span class="text-red-500 mr-2 mt-0.5">🔨</span>
+                        <span class="text-[var(--danger-color)] mr-2 mt-0.5">🔨</span>
                         <p><strong>Auto-Eviction Enforcement:</strong> Instantly re-bans any user attempting to evade a prior permanent ban.</p>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="text-red-500 mr-2 mt-0.5">🔍</span>
-                        <p><strong>Background Checks:</strong> Staff can instantly look up a user's full disciplinary history.</p>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="text-red-500 mr-2 mt-0.5">🚨</span>
-                        <p><strong>Neighborhood Watch:</strong> Automatic content filters prevent spam and unauthorized promotion.</p>
                     </li>
                 </ul>
             </div>
             
             <hr class="border-gray-700">
             
-            <!-- User Utility Features -->
+            <!-- Cross-Links -->
             <div class="space-y-4">
-                <h2 class="text-2xl font-semibold text-gray-200">⚙️ Member Utilities & Information</h2>
-                <ul class="space-y-3 text-gray-400 grid md:grid-cols-2">
-                    <li class="flex items-start">
-                        <span class="text-indigo-400 mr-2 mt-0.5">📝</span>
-                        <p><strong>The Lease Agreement:</strong> Use `!rules` for essential guidelines.</p>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="text-indigo-400 mr-2 mt-0.5">🗓️</span>
-                        <p><strong>Weekly Rota:</strong> Use `!schedule` for content and event times.</p>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="text-indigo-400 mr-2 mt-0.5">🔑</span>
-                        <p><strong>The Keyring:</strong> Use `!links` for all official platforms.</p>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="text-indigo-400 mr-2 mt-0.5">🤫</span>
-                        <p><strong>Tattletale Tool:</strong> Use `!report` for discreet submissions.</p>
-                    </li>
+                <h2 class="text-2xl font-semibold text-gray-200">🔗 Community Platforms</h2>
+                <ul class="space-y-3 text-gray-400">
+                    {
+                        ''.join([
+                            f"""
+                            <li class="flex justify-between items-center bg-gray-700/30 p-3 rounded-lg">
+                                <span class="font-medium text-white">{link['name']}</span>
+                                <a href="{link['url']}" target="_blank" class="text-[var(--danger-color)] hover:underline">
+                                    Visit Site &rarr;
+                                </a>
+                            </li>
+                            """ for link in GND_LINKS
+                        ])
+                    }
                 </ul>
             </div>
 
@@ -144,12 +183,11 @@ def home():
             <div class="text-center text-sm text-gray-500 space-y-2">
                 <p class="text-red-400 font-bold">⚠️ AGE RESTRICTION: ALL GND PLATFORMS ARE STRICTLY 18+</p>
                 <p>
-                    <!-- IMPORTANT: Using the specific legal links from the bot_logic snippet/markdown files -->
-                    <a href="https://guysnextdoor.netlify.app/legal/policy" target="_blank" class="hover:text-red-500 transition">Privacy Policy</a> | 
-                    <a href="https://guysnextdoor.netlify.app/legal/tos" target="_blank" class="hover:text-red-500 transition">Terms of Service</a>
+                    <a href="https://guysnextdoor.netlify.app/legal/policy" target="_blank" class="hover:text-[var(--danger-color)] transition">Privacy Policy</a> | 
+                    <a href="https://guysnextdoor.netlify.app/legal/tos" target="_blank" class="hover:text-[var(--danger-color)] transition">Terms of Service</a>
                 </p>
                 <!-- Admin link is discreetly placed for staff access -->
-                <p>Staff: <a href="/admin" class="hover:text-red-500 transition text-gray-600 font-medium border-b border-dotted border-gray-600">Admin Portal Login</a></p>
+                <p>Staff: <a href="/admin" class="hover:text-[var(--danger-color)] transition text-gray-600 font-medium border-b border-dotted border-gray-600">Admin Portal Login</a></p>
             </div>
             
         </div>
