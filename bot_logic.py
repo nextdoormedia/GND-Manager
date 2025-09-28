@@ -36,6 +36,11 @@ VERIFICATION_EMOJI = '✅'
 ACTIVE_CHATTERS = set() # Unique user IDs who send a message since last reset/startup
 CHANNEL_ACTIVITY = collections.defaultdict(int) # {channel_id: message_count}
 
+# --- HELPER FUNCTIONS FOR WEB DASHBOARD ---
+def get_active_chatters():
+    """Returns the current count of unique active chatters."""
+    return len(ACTIVE_CHATTERS)
+    
 # Global data containers and start time
 MOD_LOGS = {'logs': []}
 SERVER_METRICS = {}
