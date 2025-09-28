@@ -38,7 +38,7 @@ def home():
     """
     
     # We use a placeholder for the invite link here for deployment safety. 
-    DISCORD_INVITE_LINK = "https://discord.gg/YourInviteCode" 
+    DISCORD_INVITE_LINK = "https://discord.gg/EKekh3wHYQ" 
     
     is_online = bot.is_ready()
     status_text = "Operational" if is_online else "Starting Up"
