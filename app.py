@@ -13,12 +13,21 @@ app.register_blueprint(admin_bp, url_prefix='/admin')
 
 def start_discord_bot():
     """
-    Function to run the Discord bot's blocking client method.
+    Function to run the Discord bot's blocking client method safely in a thread.
+    
+    NOTE: This uses bot.start/loop.run_until_complete to safely run the bot in 
+    a separate thread, avoiding the fatal "RuntimeError: can't register atexit after shutdown".
     """
-    print("--- GND Manager: Starting Discord Bot Thread ---")
+    print("--- GND Manager: Starting Discord Bot Thread -----")
     try:
-        # DISCORD_TOKEN is retrieved from environment variables set on the hosting platform.
-        bot.run(os.getenv('DISCORD_TOKEN'), reconnect=True)
+        # 1. Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # 2. Use bot.start() to run the bot and run_until_complete to block the thread
+        # The reconnect=True argument is now passed to bot.start()
+        loop.run_until_complete(bot.start(os.getenv('DISCORD_TOKEN'), reconnect=True))
+
     except Exception as e:
         print(f"FATAL ERROR IN DISCORD BOT THREAD: {e}")
 
