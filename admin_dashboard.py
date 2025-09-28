@@ -7,7 +7,7 @@ from flask import Blueprint, request, render_template_string, jsonify
 from flask_httpauth import HTTPBasicAuth
 from werkzeug.security import generate_password_hash, check_password_hash
 import discord
-from .bot_logic import MOD_LOGS_FILE, METRICS_FILE, bot, BOT_START_TIME, get_active_chatters, get_discord_invite_link
+from bot_logic import MOD_LOGS_FILE, METRICS_FILE, bot, BOT_START_TIME, get_active_chatters, get_discord_invite_link
 
 # --- CONFIGURATION ---
 admin_bp = Blueprint('admin', __name__)
