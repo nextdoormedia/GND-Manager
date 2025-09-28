@@ -40,6 +40,11 @@ CHANNEL_ACTIVITY = collections.defaultdict(int) # {channel_id: message_count}
 def get_active_chatters():
     """Returns the current count of unique active chatters."""
     return len(ACTIVE_CHATTERS)
+
+def get_discord_invite_link():
+    """Returns the primary Discord invite link for the admin dashboard."""
+    # NOTE: This link should be kept in sync with the one in app.py
+    return "https://discord.gg/EKekh3wHYQ" 
     
 # Global data containers and start time
 MOD_LOGS = {'logs': []}
