@@ -1,17 +1,16 @@
-
 import os
 from flask import Flask
 import threading
 # Ensure bot_logic.py is in the same directory for this import to work
 from bot_logic import bot 
-from admin_dashboard import admin_bp # NEW: Import the admin blueprint
+from admin_dashboard import admin_bp # Import the admin blueprint
 
 app = Flask(__name__)
 
-# NEW: Register the admin blueprint and protect it behind the /admin URL prefix.
+# Register the admin blueprint and protect it behind the /admin URL prefix.
 app.register_blueprint(admin_bp, url_prefix='/admin')
 
-# --- START BOT IN A SEPARATE THREAD (For 24/7 Hosting) ---
+# --- START BOT IN A SEPARate THREAD (For 24/7 Hosting) ---
 
 def start_discord_bot():
     """
@@ -55,5 +54,3 @@ if __name__ == '__main__':
         app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000))
     else:
         print("ERROR: DISCORD_TOKEN environment variable not set. Please set it for local testing.")
-```eof
-
